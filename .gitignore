@@ -1,0 +1,17 @@
+# System
+.DS_Store
+
+# Imandra
+.imandra_init.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Environments
+env/
+venv/

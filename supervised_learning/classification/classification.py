@@ -4,6 +4,7 @@ from sklearn import preprocessing, model_selection
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_selection import mutual_info_classif
+import pickle
 
 def run(file):
 
@@ -48,15 +49,18 @@ def run(file):
     cv = X_train.cov()
     print(cv)
 
-    return
+    
 
-    # Create and fit decision tree
-    dt = sklearn.tree.DecisionTreeClassifier(max_depth=None, min_samples_split=2, min_samples_leaf=1, max_features=None, max_leaf_nodes=None)
+    # Create, fit, and save decision tree
+    dt = DecisionTreeClassifier(max_depth=None, min_samples_split=2, min_samples_leaf=1, max_features=None, max_leaf_nodes=None)
     dt.fit(X_train, y_train)
+    pickle.dump(dt, open("dt.pickle", 'wb'))
 
-    # Create and fit random forest
+
+    # Create, fit, and save random forest
     rf = RandomForestClassifier(n_estimators=10, max_depth=None, min_samples_split=2, min_samples_leaf=1, max_features='auto', max_leaf_nodes=None)
     rf.fit(X_train, y_train)
+    pickle.dump(dt, open("rf.pickle", 'wb'))
 
     # Check accuracy
     dt_acc = dt.score(X_test, y_test)
@@ -67,7 +71,4 @@ def run(file):
 
 if __name__ == "__main__":
 
-    # Form model
     run('wdbc.csv')
-    # run('pre-processed-wdbc.csv')
-    # rf2iml('wbdc.pickle')
