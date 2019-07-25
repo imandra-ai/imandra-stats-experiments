@@ -1,0 +1,79 @@
+let tree_0 f_0 f_1 f_2 f_3 f_4 f_5 f_6 = let open Real in
+  if f_2 <=. (-0.10815) then
+    if f_0 <=. (0.26348) then
+      if f_6 <=. (-0.06176) then
+        (236.0, 1.0)
+      else
+        (17.0, 5.0)
+    else
+      if f_3 <=. (-0.54236) then
+        (8.0, 2.0)
+      else
+        (3.0, 7.0)
+  else
+    if f_6 <=. (0.09812) then
+      if f_6 <=. (-0.17063) then
+        (24.0, 0.0)
+      else
+        (4.0, 2.0)
+    else
+      if f_2 <=. (2.65413) then
+        (6.0, 128.0)
+      else
+        (7.0, 5.0);;
+
+let tree_1 f_0 f_1 f_2 f_3 f_4 f_5 f_6 = let open Real in
+  if f_5 <=. (-0.05799) then
+    if f_0 <=. (0.68524) then
+      if f_1 <=. (-0.83180) then
+        (110.0, 3.0)
+      else
+        (137.0, 0.0)
+    else
+      if f_3 <=. (0.45504) then
+        (1.0, 8.0)
+      else
+        (0.0, 7.0)
+  else
+    if f_0 <=. (-0.18668) then
+      if f_6 <=. (0.45214) then
+        (39.0, 0.0)
+      else
+        (2.0, 11.0)
+    else
+      if f_6 <=. (-0.00009) then
+        (8.0, 4.0)
+      else
+        (5.0, 120.0);;
+
+let tree_2 f_0 f_1 f_2 f_3 f_4 f_5 f_6 = let open Real in
+  if f_2 <=. (0.10459) then
+    if f_5 <=. (-0.38015) then
+      if f_5 <=. (-0.60659) then
+        (139.0, 1.0)
+      else
+        (44.0, 3.0)
+    else
+      if f_6 <=. (-0.07927) then
+        (38.0, 2.0)
+      else
+        (25.0, 17.0)
+  else
+    if f_6 <=. (0.46888) then
+      if f_3 <=. (0.41642) then
+        (28.0, 3.0)
+      else
+        (1.0, 4.0)
+    else
+      if f_2 <=. (1.74327) then
+        (3.0, 122.0)
+      else
+        (4.0, 21.0);;
+
+let rf (f_0, f_1, f_2, f_3, f_4, f_5, f_6) = let open Real in
+let (a_0, b_0) = tree_0 f_0 f_1 f_2 f_3 f_4 f_5 f_6 in
+let (a_1, b_1) = tree_1 f_0 f_1 f_2 f_3 f_4 f_5 f_6 in
+let (a_2, b_2) = tree_2 f_0 f_1 f_2 f_3 f_4 f_5 f_6 in
+let a = a_0 + a_1 + a_2 in
+let b = b_0 + b_1 + b_2 in
+(a, b);;
