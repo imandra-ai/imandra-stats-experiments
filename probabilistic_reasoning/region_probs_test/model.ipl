@@ -1,0 +1,18 @@
+internal state {
+   x : int = 1;
+}
+
+action Update {
+  newx : int
+  errint : int
+  
+}
+
+receive ( act : Update ) {
+  if((act.newx > state.x)) then {
+     state.x = act.newx
+  } else {
+     state.x = act.errint
+  }
+}
+

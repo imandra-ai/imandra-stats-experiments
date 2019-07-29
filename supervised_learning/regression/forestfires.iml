@@ -15,7 +15,7 @@ let layer_1 (x_0, x_1, x_2, x_3, x_4, x_5) = let open Real in
 let y_0 = linear @@ (0.28248)*x_0 + (-0.25208)*x_1 + (-0.50075)*x_2 + (-0.07092)*x_3 + (-0.43189)*x_4 + (0.60065)*x_5 + 0.47136 in
 (y_0);;
 
-let nn x_0 x_1 x_2 x_3 x_4 x_5 = let open Real in 
+let nn (x_0, x_1, x_2, x_3, x_4, x_5) = let open Real in 
 (x_0, x_1, x_2, x_3, x_4, x_5)
 |> layer_0
 |> layer_1
