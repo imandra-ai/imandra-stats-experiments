@@ -73,15 +73,13 @@ let base ?(a = 0.) ?(b = 1.) () =
   a +. Random.float (b -. a)
 
 
-(* Define cumulative density functions for inverse transform sampling *)
-
-
-
-
-
 (* Define quantile functions for inverse transform sampling *)
 
-let q_binomial x [n, p] =
+let q_bernoulli x ~p:p = 
+  let () = assert (bounded p) in
+  if x < p then true else false
+
+let q_binomial x [n; p] =
   let () = assert (bounded p && n >= 0.) in
   let rec get_successes k prob =
     let term = (choose n k) *. (p ** k) *. ((1.0 -. p) ** (n -. 1.0)) in
@@ -89,11 +87,7 @@ let q_binomial x [n, p] =
     else get_successes (k +. 1.) (term +. prob)
   in get_successes 0. 0.
 
-let q_bernoulli x [p] = 
-  let () = assert (bounded p) in
-  if x < p then true else false
-
-let q_categorical x [classes, probs] =
+let q_categorical x [classes; probs] =
   let () = assert (classes <> [] && List.length classes = List.length probs && List.for_all bounded probs && sum probs = 1.0) in
   let rec loop x y cs ps =
     match cs, ps with
@@ -104,28 +98,9 @@ let q_categorical x [classes, probs] =
         else loop x (p +. y) _cs _ps
   in loop x 0. classes probs
 
-let q_uniform x [a, b] = 
-  let () = assert (a <= b) in
-  a +. ((b -. a) *. x)
- 
-let q_exponential x [lambda] = 
-  let () = assert (lambda > 0.) in
-  -.(log (1.0 -. x)) /. lambda
-
-let q_logistic x [mu, s] = 
-  let () = assert (s > 0.) in
-  mu +. (s *. log (x /. (1.0 -. x)))
-
-let q_cauchy x [x_0, gamma] = 
+let q_cauchy x [x_0; gamma] = 
   let () = assert (gamma > 0.) in
   x_0 +. (gamma *. tan(pi *. (x -. 0.5)))
-
-let q_laplace x [mu, b] = 
-  let () = assert (b > 0.) in
-  if x <= 0.5 then
-    mu +. (b *. log (2.0 *. x))
-  else
-    mu -. (b *. log (2.0 -. (2.0 *. x)))
 
 let q_delta x [d] =
   if x = 1.0 then d 
@@ -136,6 +111,21 @@ let q_delta x [d] =
         else f
     in get_non_d ()
 
+let q_exponential x [lambda] = 
+  let () = assert (lambda > 0.) in
+  -.(log (1.0 -. x)) /. lambda
+
+let q_laplace x [mu; b] = 
+  let () = assert (b > 0.) in
+  if x <= 0.5 then
+    mu +. (b *. log (2.0 *. x))
+  else
+    mu -. (b *. log (2.0 -. (2.0 *. x)))
+
+let q_logistic x [mu; s] = 
+  let () = assert (s > 0.) in
+  mu +. (s *. log (x /. (1.0 -. x)))
+
 let q_poisson x [lambda] =
   let () = assert (lambda > 0.) in
   let rec get_successes k prob =
@@ -145,29 +135,94 @@ let q_poisson x [lambda] =
     else get_successes (k +. 1.) (term +. prob)
   in get_successes 0. 0.
 
+let q_uniform x [a; b] = 
+  let () = assert (a <= b) in
+  a +. ((b -. a) *. x)
+
+
+(* Define cumulative density functions for inverse transform sampling *)
+
+let c_bernoulli x ~p:p = 
+  let () = assert (bounded p) in
+  if x then p else (1. -. p)
+
+let q_binomial x [n; p] =
+  let () = assert (bounded p && n >= 0.) in
+  let rec get_successes k prob =
+    let term = (choose n k) *. (p ** k) *. ((1.0 -. p) ** (n -. 1.0)) in
+    if x <= term +. prob then k
+    else get_successes (k +. 1.) (term +. prob)
+  in get_successes 0. 0.
+
+let q_categorical x classes probs =
+  let () = assert (classes <> [] && List.length classes = List.length probs && List.for_all bounded probs && sum probs = 1.0) in
+  let rec loop x y cs ps =
+    match cs, ps with
+      | [], _ -> List.hd classes
+      | _, [] -> List.hd classes
+      | c :: _cs, p :: _ps -> 
+        if x <= p +. y then c
+        else loop x (p +. y) _cs _ps
+  in loop x 0. classes probs
+
+let q_cauchy x [x_0; gamma] = 
+  let () = assert (gamma > 0.) in
+  x_0 +. (gamma *. tan(pi *. (x -. 0.5)))
+
+let c_delta x [d] =
+  if x = d then 1. else 0.
+
+let q_exponential x [lambda] = 
+  let () = assert (lambda > 0.) in
+  -.(log (1.0 -. x)) /. lambda
+
+let q_laplace x [mu; b] = 
+  let () = assert (b > 0.) in
+  if x <= 0.5 then
+    mu +. (b *. log (2.0 *. x))
+  else
+    mu -. (b *. log (2.0 -. (2.0 *. x)))
+
+let q_logistic x [mu; s] = 
+  let () = assert (s > 0.) in
+  mu +. (s *. log (x /. (1.0 -. x)))
+
+let q_poisson x [lambda] =
+  let () = assert (lambda > 0.) in
+  let rec get_successes k prob =
+    let log_term = -.lambda +. (k *. log lambda) -. log_factorial k in
+    let term = exp log_term in
+    if x <= term +. prob then k
+    else get_successes (k +. 1.) (term +. prob)
+  in get_successes 0. 0.
+
+let q_uniform x [a; b] = 
+  let () = assert (a <= b) in
+  a +. ((b -. a) *. x)
+
 
 (* Define density functions for MCMC sampling *)
 
-let d_gaussian x [mu, sigma] =
+let d_beta x [a; b] =
+  let z = (gamma a) *. (gamma b) /. gamma (a +. b) in
+  (1. /. z) *. (x ** (a -. 1.)) *. ((1. -. x) ** (b -. 1.))
+
+let d_gamma x [k; theta] =
+  let z = (gamma k) *. (theta ** k) in
+  (1. /. z) *. (x ** (k -. 1.)) *. (exp (-.x /. theta))
+
+let d_gaussian x [mu; sigma] =
   let z = sigma *. sqrt (2. *. pi) in
   let e = ((x -. mu) /. (2. *. sigma)) ** 2.
   in (1. /. z) *. exp (-.e)
 
-let d_gamma x [k, theta] =
-  let z = (gamma k) *. (theta ** k) in
-  (1. /. z) *. (x ** (k -. 1.)) *. (exp (-.x /. theta))
-  
-let d_beta x [a, b] =
-  let z = (gamma a) *. (gamma b) /. gamma (a +. b) in
-  (1. /. z) *. (x ** (a -. 1.)) *. ((1. -. x) ** (b -. 1.))
-
 
 (* Define sampling functions *)
 
-let inverse_transform_sample qf u_rs n_w_rs =
+let inverse_transform_sample qf (u_rs, n_w_rs) =
   match u_rs, n_w_rs with
 	| [], [] -> qf (base ())
-	| _, _ -> let (r1, r2) = q_categorical (base ()) [u_rs, n_w_rs] in
+	| _, _ -> let (r1, r2) = q_categorical (base ()) u_rs n_w_rs in
               base ~a:r1 ~b:r2 () |> qf
     
 let mcmc_sample pdf constraints cur_x step =
@@ -221,6 +276,7 @@ type 'a dists =
   | Categorical of {qf: float -> ('a list) * (float list) -> 'a; cdf: 'a -> ('a list) * (float list) -> float}
   | InverseTransform of {qf: float -> float list -> 'a; cdf: 'a -> float list -> float}
   | MCMC of {pdf: 'a -> float params -> float}
+
 
 (* Define module types *)
 
@@ -315,6 +371,11 @@ module Laplace : Dist_Type = struct
   let d = InverseTransform {qf = q_laplace; cdf = }
 end
 
+module Logistic : Dist_Type = struct
+  type t = float
+  let d = InverseTransform {qf = q_logistic; cdf = }
+end
+
 module LogNormal : Dist_Type = struct
   type t = float
   let d = MCMC {pdf = d_lognormal}
@@ -333,7 +394,8 @@ end *)
 
 (* Define sampler functor *)
 
-module Sampler (D : Dist_Type) (P : Params_Type with type t = D.t) (C : Consts_Type with type t = D.t) = struct
+
+module Sampler1 (D : Dist_Type) (P : Params_Type with type t = D.t) (C : Consts_Type with type t = D.t) = struct
 
   type t = D.t
 
@@ -369,7 +431,7 @@ module Sampler (D : Dist_Type) (P : Params_Type with type t = D.t) (C : Consts_T
 	  in let new_c, new_p = loop classes probs [] [] in
 	  new_c, (normalise new_p)
 	  
-  let sample n ?(step = 1.) ?(start = 0.) =
+  (* let sample n ?(step = 1.) ?(start = 0.) =
     let get_sample =
       match P.p with
         | NumParam p_l ->
@@ -400,15 +462,112 @@ module Sampler (D : Dist_Type) (P : Params_Type with type t = D.t) (C : Consts_T
                   inverse_transform_sample qf [] []        
       in for i in 1 to n 
 
-  
+  *)
 end 
+
+
+
+
+module type Inverse_Transform = sig
+  type value
+  val qf : float -> value
+  val cdf : value -> float
+  val constraints : (float * float) list * float list
+end
+
+module type MCMC = sig
+  type value
+  val pdf : value -> float
+  val constraints : (float * float) list
+end
+
+module Sampler = struct
+  module type S = sig
+    type value
+    val sample : ?step:float -> ?start:float -> int -> value list
+  end
+  module Make_Inverse_Transform (D : Inverse_Transform) : S with type value = D.value = struct
+    type value = D.value
+    let sample ?step:_ ?start:_ n =
+      let rec loop samples num =
+        match num with
+          | 0 -> samples
+          | _ -> 
+            let s = inverse_transform_sample D.qf D.constraints in 
+            loop (s :: samples) (num - 1)
+      in loop [] n
+  end
+  module Make_MCMC (D : MCMC) : S with type value = D.value = struct
+    type value = D.value
+    let sample ?step:step ?start:cur_x n =
+      let rec loop samples num =
+        match num with
+          | 0 -> samples
+          | _ -> 
+            let s = mcmc_sample D.pdf D.constraints cur_x step in 
+            loop (s :: samples) (num - 1)
+      in loop [] n
+      
+end
+
+(* let samples = My_bernoulli.sample 10 *)
+
+
+(* Distributions *)
+
+module Bernoulli (Params : sig val p : float end) (Constraints : sig val c : bool option end)
+  : Sampler.S with type value = bool = struct
+    include Sampler.Make_Inverse_Transform (struct
+      type value = bool
+      let qf x = q_bernoulli x ~p:Params.p
+      let cdf x = c_bernoulli x ~p:Params.p
+      let constraints = 
+        match Constraints.c with
+          | None -> [], []
+          | Some b -> if b then [(0., 0.)], [1.] else [(1., 1.)], [1.]
+    end)
+end
+
+(* Example user code *)
+module My_bernoulli = Bernoulli (struct let p = 1.0 end) (struct let c = None end)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
 
 
 (* 
-
 
 module Make (A : Dist_Type) : Sampler_Type = struct
 
