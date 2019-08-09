@@ -9,6 +9,12 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# OCaml
+_build/
+.merlin
+*.install
+dune-project
+
 # Jupyter Notebook
 .ipynb_checkpoints
 
