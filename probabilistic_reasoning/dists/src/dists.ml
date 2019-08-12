@@ -268,75 +268,18 @@ let mcmc_sample pdf constraints cur_x step =
   if u <= ratio then new_x else cur_x
 
 
-(* Define required variable types *)
-(* 
-type st = RS.t
-
-type 'a consts =
-  | NumConst of ('a * 'a) list
-  | CatConst of 'a list
-
-type 'a params =
-  | NumParam of float list
-  | CatParam of ('a list) * (float list)
-
-type 'a dists =
-  | Categorical of {qf: float -> ('a list) * (float list) -> 'a; cdf: 'a -> ('a list) * (float list) -> float}
-  | InverseTransform of {qf: float -> float list -> 'a; cdf: 'a -> float list -> float}
-  | MCMC of {pdf: 'a -> float params -> float}
-
-
-(* Define module types *)
-
-module type Dist_Type = sig
-  type t
-  val d : t dists
-end
-
-module type Params_Type = sig
-  type t
-  val p : t params
-end
-
-module type Consts_Type = sig
-  type t
-  val c : t consts
-end
-
-module type Sampler_Type = sig
-  type t
-  val dists : t dists
-  val params : t params
-  val constraints : t consts
-  val sample : int -> t list
-end
-
-
-(* Define functions for forming first-class parameter and constraint modules *)
-
-let params (type a) (param_list : a params) =
-  let module P : Params_Type = (struct
-    type t = a
-    let p = param_list
-  end) in (module P : Params_Type)
-
-let constraints (type a) (constraints_list : a consts) =
-  let module C : Consts_Type = (struct
-    type t = a
-    let c = constraints_list
-  end) in (module C : Consts_Type) *)
-
-
 (* Sampler functor and related types *)
 
-module type Inverse_Transform = sig
+type st = RS.t
+
+module type Inverse_Transform_S = sig
   type value
   val qf : float -> value
   val cdf : value -> float
   val constraints : (float * float) list * float list
 end
 
-module type MCMC = sig
+module type MCMC_S = sig
   type value
   val pdf : float -> float
   val start : float
@@ -349,9 +292,9 @@ module Sampler = struct
     type value
     val sample : ?start:float -> ?step:float -> int -> value list
   end
-  module Make_Inverse_Transform (D : Inverse_Transform) : S with type value = D.value = struct
+  module Make_Inverse_Transform (D : Inverse_Transform_S) : S with type value = D.value = struct
     type value = D.value
-    let sample ?start:_ ?step:_  n =
+    let sample ?start:_ ?step:_ n =
       let rec loop samples num =
         match num with
           | 0 -> samples
@@ -360,7 +303,7 @@ module Sampler = struct
             loop (s :: samples) (num - 1)
       in loop [] n
   end
-  module Make_MCMC (D : MCMC) : S with type value = float = struct
+  module Make_MCMC (D : MCMC_S) : S with type value = float = struct
     type value = float
     let sample ?(start = D.start) ?(step = D.step) n =
       let rec loop samples num =
@@ -622,75 +565,6 @@ end
 
 
 (* Example user code *)
-module My_bernoulli = Bernoulli (struct let p = 1.0 end) (struct let c = None end)
 
+module My_bernoulli = Bernoulli (struct let p = 0.5 end) (struct let c = None end)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-(* 
-
-module Make (A : Dist_Type) : Sampler_Type = struct
-
-  module Uniform = struct
-
-    type t = {
-      a : A.arr;
-      b : A.arr;
-    }
-
-    let make ~a ~b =
-      Utility._check_broadcast_shape [|a; b|];
-      { a; b }
-
-    let sample t n = A.uniform_rvs ~a:t.a ~b:t.b ~n
-
-    let pdf t x = A.uniform_pdf ~a:t.a ~b:t.b x
-
-    let logpdf t x = A.uniform_logpdf ~a:t.a ~b:t.b x
-
-    let cdf t x = A.uniform_cdf ~a:t.a ~b:t.b x
-
-    let logcdf t x = A.uniform_logcdf ~a:t.a ~b:t.b x
-
-    let ppf t x = A.uniform_ppf ~a:t.a ~b:t.b x
-
-    let sf t x = A.uniform_sf ~a:t.a ~b:t.b x
-
-    let logsf t x = A.uniform_logsf ~a:t.a ~b:t.b x
-
-    let isf t x = A.uniform_isf ~a:t.a ~b:t.b x
-
-  end *)
