@@ -12,12 +12,24 @@ module RS = Random.State
 
 let pi = 4. *. atan 1.
 
+let log_2_pi = log (2. *. pi) 
+
 
 (* Helper functions *)
 
 let bounded x = x >= 0. && x <= 1.
 
 let sum l = List.fold_left (+.) 0. l
+
+let sum_n n l =
+  let rec loop l' m s =
+    match m with
+      | 0 -> s
+      | _ -> 
+        match l' with
+          | [] -> s
+          | h :: t -> loop t (m - 1) (s +. h)
+  in loop l n 0.
  
 let normalise l = let s = (sum l) in List.map (fun x -> x /. s) l
 
@@ -28,13 +40,21 @@ let log_factorial x =
   in loop 1. 0.
   
 let choose n k =
-  let rec loop i j a =
-    if j = 0. then a
-    else loop (i -. 1.) (j -. 1.) (a *. (i /. j))
-  in loop n k 1.
+  if k < 0. then failwith "Must choose a non-negative number k in nCk"
+  else if n < 0. then failwith "Must choose from non-negative number n in nCk"
+  else
+    let rec loop i j a =
+      if j = 0. then a
+      else loop (i -. 1.) (j -. 1.) (a *. (i /. j))
+    in loop n k 1.
 
-let gamma _ = failwith "TODO"
-
+let log_nemes_closed_form x =
+  let log_x = log x in
+  let fifteen_x_sq = 15. *. (x ** 2.) in
+  (x *. log_x) -. x +. (0.5 *. (log_2_pi -. log_x)) +. (1.25 *. x *. (log (fifteen_x_sq +. 1.) -. log (fifteen_x_sq)))
+  
+let gamma x = (exp (log_nemes_closed_form (x +. 1.))) /. x
+  
 let constrain_categorical (constraints) (classes, probs) =
   let rec loop old_c old_p new_c new_p =
 	match old_c, old_p with
@@ -46,7 +66,8 @@ let constrain_categorical (constraints) (classes, probs) =
 		else
 		  loop cs ps new_c new_p
   in let new_c, new_p = loop classes probs [] [] in
-  new_c, (normalise new_p)
+  if sum new_p = 0. then failwith "Constrained classes have zero total probability mass"
+  else new_c, (normalise new_p)
 
 let get_uniform_constraints rs cdf =
   let rec loop rs u_rs w_rs =
@@ -57,7 +78,8 @@ let get_uniform_constraints rs cdf =
 		let w = c_b -. c_a in
 		loop t ((c_a, c_b) :: u_rs) (w :: w_rs)
   in let (u_rs, w_rs) = loop rs [] [] in
-  u_rs, (normalise w_rs)
+  if sum w_rs = 0. then failwith "Constrained regions have zero total probability mass"
+  else u_rs, (normalise w_rs)
 
 let closest m cs =
   let rec loop curr dist list =
@@ -110,99 +132,110 @@ let base ?(a = 0.) ?(b = 1.) () =
 
 (* Quantile functions *)
 
-let q_bernoulli x ~p:p = 
-  if x <= p then true else false
+let q_bernoulli x ~p = 
+  if x <= (1. -. p) then false else true
 
-let q_binomial x ~n:n ~p:p =
+let q_binomial x ~n ~p =
   let rec get_successes k prob =
-    let term = (choose n k) *. (p ** k) *. ((1. -. p) ** (n -. 1.)) in
-    if x <= term +. prob then int_of_float k
-    else get_successes (k +. 1.) (term +. prob)
-  in get_successes 0. 0.
+    let term = (choose n k) *. (p ** k) *. ((1. -. p) ** (n -. k)) in
+    let new_term = term +. prob in
+    if x <= new_term || k = n then int_of_float k
+    else get_successes (k +. 1.) new_term
+  in if x = 1. then int_of_float n else
+  get_successes 0. 0.
 
-let q_categorical x ~classes:classes ~probs:probs =
+let q_categorical x ~classes ~probs =
   let rec loop prob cs ps =
     match cs, ps with
       | [], _ -> failwith "Must have same number of classes as probabilities"
       | _, [] -> failwith "Must have same number of classes as probabilities"
       | c :: _cs, p :: _ps -> 
-        if x <= p +. prob then c
-        else loop (p +. prob) _cs _ps
+        let new_prob = p +. prob in
+        if x <= new_prob || new_prob = 1. then c
+        else loop new_prob _cs _ps
   in loop 0. classes probs
 
-let q_cauchy x ~x_0:x_0 ~gamma:gamma = 
-  x_0 +. (gamma *. tan(pi *. (x -. 0.5)))
+let q_cauchy x ~x_0 ~gamma =
+  if x = 0. then -.infinity
+  else if x = 1. then infinity
+  else x_0 +. (gamma *. tan(pi *. (x -. 0.5)))
 
-let q_exponential x ~lambda:lambda = 
-  -.(log (1. -. x)) /. lambda
+let q_exponential x ~lambda = 
+  if x = 1. then -.infinity
+  else -.(log (1. -. x)) /. lambda
 
-let q_laplace x ~mu:mu ~b:b = 
-  if x <= 0.5 then mu +. (b *. log (2. *. x))
+let q_laplace x ~mu ~b = 
+  if x = 0. then -.infinity
+  else if x = 1. then infinity
+  else if x <= 0.5 then mu +. (b *. log (2. *. x))
   else mu -. (b *. log (2. -. (2. *. x)))
 
-let q_logistic x ~mu:mu ~s:s = 
-  mu +. (s *. log (x /. (1. -. x)))
+let q_logistic x ~mu ~s = 
+  if x = 0. then -.infinity
+  else if x = 1. then infinity
+  else mu +. (s *. log (x /. (1. -. x)))
 
-let q_poisson x ~lambda:lambda =
+let q_poisson x ~lambda =
   let rec get_successes k prob =
     let log_term = -.lambda +. (k *. log lambda) -. log_factorial k in
     let term = exp log_term in
     if x <= term +. prob then int_of_float k
     else get_successes (k +. 1.) (term +. prob)
-  in get_successes 0. 0.
+  in if x = 1. then max_int
+  else get_successes 0. 0.
 
-let q_uniform x ~a:a ~b:b = 
+let q_uniform x ~a ~b = 
   a +. ((b -. a) *. x)
 
 
 (* Cumulative density functions *)
 
-let c_bernoulli x ~p:p = 
-  if x then p else (1. -. p)
+let c_bernoulli x ~p = 
+  if x then 1. else (1. -. p)
 
-let c_binomial x ~n:n ~p:p =
+let c_binomial x ~n ~p =
   let rec get_prob k prob =
-    if k > x then 
-      prob
+    if k > x then prob
     else
-      let term = (choose n k) *. (p ** k) *. ((1. -. p) ** (n -. 1.)) in
+      let term = (choose n k) *. (p ** k) *. ((1. -. p) ** (n -. k)) in
       get_prob (k +. 1.) (term +. prob)
-  in get_prob 0. 0.
+  in if x > n then 1.0
+  else get_prob 0. 0.
 
-let c_categorical x ~classes:classes ~probs:probs =
+let c_categorical x ~classes ~probs =
   let rec loop prob cs ps =
     match cs, ps with
       | [], _ -> failwith "Must have same number of classes as probabilities"
       | _, [] -> failwith "Must have same number of classes as probabilities"
       | c :: _cs, p :: _ps -> 
-        if c = x then prob
+        if c = x then (p +. prob)
         else loop (p +. prob) _cs _ps
   in loop 0. classes probs
 
-let c_cauchy x ~x_0:x_0 ~gamma:gamma = 
+let c_cauchy x ~x_0 ~gamma = 
   (1. /. pi) *. atan ((x -. x_0) /. gamma) +. 0.5
 
-let c_exponential x ~lambda:lambda = 
-  1. -. exp (-.lambda *. x) 
+let c_exponential x ~lambda = 
+  if x < 0. then 0.
+  else 1. -. exp (-.lambda *. x) 
 
-let c_laplace x ~mu:mu ~b:b = 
+let c_laplace x ~mu ~b = 
   if x <= mu then 0.5 *. exp ((x -. mu) /. b)
   else 1. -. (0.5 *. exp (-. (x -. mu) /. b))
 
-let c_logistic x ~mu:mu ~s:s = 
+let c_logistic x ~mu ~s = 
   1. /. (1. +. exp (-. (x -. mu) /. s))
 
-let c_poisson x ~lambda:lambda =
+let c_poisson x ~lambda =
   let rec get_prob k prob =
-    if k > x then 
-      prob
+    if k > x then prob
     else
       let log_term = -.lambda +. (k *. log lambda) -. log_factorial k in
       let term = exp log_term in
       get_prob (k +. 1.) (term +. prob)
   in get_prob 0. 0.
 
-let c_uniform x ~a:a ~b:b =
+let c_uniform x ~a ~b =
   if x < a then 0.
   else if x > b then 1.
   else (x -. a) /. (b -. a) 
@@ -210,21 +243,34 @@ let c_uniform x ~a:a ~b:b =
 
 (* Density functions *)
 
-let d_beta x ~a:a ~b:b =
-  let z = (gamma a) *. (gamma b) /. gamma (a +. b) in
-  (1. /. z) *. (x ** (a -. 1.)) *. ((1. -. x) ** (b -. 1.))
+let d_beta x ~a ~b =
+  if x < 0. then failwith "Beta PDF is not defined for x < 0"
+  else if x > 1. then failwith "Beta PDF is not defined for x > 1"
+  else if a < 1. && x = 0. then infinity
+  else if b < 1. && x = 1. then infinity
+  else
+    let z = (gamma a) *. (gamma b) /. gamma (a +. b) in
+    (1. /. z) *. (x ** (a -. 1.)) *. ((1. -. x) ** (b -. 1.))
 
-let d_gamma x ~k:k ~theta:theta =
-  let z = (gamma k) *. (theta ** k) in
-  (1. /. z) *. (x ** (k -. 1.)) *. (exp (-.x /. theta))
+let d_gamma x ~k ~theta =
+  if x < 0. then failwith "Gamma PDF is not defined for x < 0"
+  else if k < 1. && x = 0. then infinity
+  else 
+    let z = (gamma k) *. (theta ** k) in
+    (1. /. z) *. (x ** (k -. 1.)) *. (exp (-.x /. theta))
 
-let d_gaussian x ~mu:mu ~sigma:sigma =
+let d_gaussian x ~mu ~sigma =
   let z = sigma *. sqrt (2. *. pi) in
-  let e = ((x -. mu) /. (2. *. sigma)) ** 2.
-  in (1. /. z) *. exp (-.e)
+  let e = ((x -. mu) ** 2.) /. (2. *. (sigma ** 2.)) in
+  (1. /. z) *. exp (-.e)
 
-let d_lognormal x ~mu:mu ~sigma:sigma =
-  exp (d_gaussian x ~mu:mu ~sigma:sigma)
+let d_lognormal x ~mu ~sigma =
+  if x < 0. then failwith "LogNormal PDF is not defined for x < 0"
+  else if x = 0. then 0.
+  else
+    let z = x *. sigma *. sqrt (2. *. pi) in
+    let e = (((log x) -. mu) ** 2.) /. (2. *. (sigma ** 2.)) in
+    (1. /. z) *. exp (-.e)
 
 
 (* Sampling algorithms *)
@@ -236,7 +282,7 @@ let inverse_transform_sample qf (u_rs, n_w_rs) =
               base ~a:r1 ~b:r2 () |> qf
     
 let mcmc_sample pdf bounds constraints cur_x step =
-  let (upper, lower) = bounds in
+  let (lower, upper) = bounds in
   let rec apply_constraints rs prev p =
     let (a, b) = prev in
     match rs with
@@ -253,8 +299,7 @@ let mcmc_sample pdf bounds constraints cur_x step =
         else 
           apply_constraints t (Some c, Some d) p
       | _ -> None 
-    in
-  let rec get_proposal () =
+  in let rec get_proposal () =
     let epsilon = base ~a:(-.step) ~b:step () in
     let new_x = cur_x +. epsilon in
     if new_x < lower || new_x > upper then
@@ -286,19 +331,20 @@ module type MCMC_S = sig
   type value
   val pdf : float -> float
   val bounds : float * float
+  val constraints : (float * float) list
   val start : float
   val step : float
-  val constraints : (float * float) list
+  val to_burn : int
 end
 
 module Sampler = struct
   module type S = sig
     type value
-    (* val sample : ?start:float -> ?step:float -> ?burn_in:int -> int -> value list *)
+    val sample : ?start:float -> ?step:float -> int -> value list
   end
   module Make_Inverse_Transform (D : Inverse_Transform_S) : S with type value = D.value = struct
     type value = D.value
-    let sample ?start:_ ?step:_ ?burn_in:_ n =
+    let sample ?start:_ ?step:_ n =
       let rec loop samples num =
         match num with
           | 0 -> samples
@@ -309,32 +355,29 @@ module Sampler = struct
   end
   module Make_MCMC (D : MCMC_S) : S with type value = float = struct
     type value = float
-    let sample ?(start = D.start) ?(step = D.step) ?(burn = 1000) n =
-      let rec burn_in num acceptance_rates rate prev_10 last b_step =
-        match num with
-          | 0 -> (last, b_step)
-          | _ ->               
-            let s = mcmc_sample D.pdf D.bounds D.constraints last b_step in
-            let r = if s = last then 0.01 else 0. in
-            let new_10 = r +. prev_10 in
-            if (num - 1) mod 10 = 0 then
-              let new_acceptance_rates = new_10 :: acceptance_rates in
-              if (num - 1) mod 100 = 0 then
-                let new_rate = rate +. new_10 -. (List.nth acceptance_rates 10) in
-                let diff = 1. +. (new_rate -. 0.25) in
-                burn_in (num - 1) new_acceptance_rates new_rate 0. s (diff *. b_step)
-              else
-                burn_in (num - 1) new_acceptance_rates (rate +. new_10) 0. s b_step
+    let batch = D.to_burn / 10
+    let rec burn b_num b_last b_step a r =
+        match b_num with
+          | 0 -> b_step
+          | _ -> 
+            let s = mcmc_sample D.pdf D.bounds D.constraints b_last b_step in 
+            let a', r' = if s = b_last then a, r +. 1. else a +. 1., r in
+            if (b_num - 1) mod batch = 0 then
+              let rate = a' /. (a' +. r') in
+              let diff = 1. +. (rate -. (1./.3.)) in
+              burn (b_num - 1) s (diff *. b_step) 0. 0.
             else
-              burn_in (num - 1) acceptance_rates rate new_10 s b_step
-      in let (burn_in_start, burn_in_step) = burn_in burn [] step start 0. step in
-      let rec loop samples num last =
+              burn (b_num - 1) s b_step a' r'
+    let burn_in_step = burn D.to_burn D.start D.step 0. 0.
+    let sample ?(start = D.start) ?(step = burn_in_step) n =
+      let rec loop samples num last a r =
         match num with
           | 0 -> samples
           | _ -> 
-            let s = mcmc_sample D.pdf D.bounds D.constraints last burn_in_step in 
-            loop (s :: samples) (num - 1) s
-      in loop [] n burn_in_start
+            let s = mcmc_sample D.pdf D.bounds D.constraints last step in 
+            if s = last then loop (s :: samples) (num - 1) s a (r + 1)
+            else loop (s :: samples) (num - 1) s (a + 1) r
+      in loop [] n start 0 0
     end
 end
 
@@ -372,12 +415,14 @@ module Beta
           | None -> []
           | Some l -> l
       let step =
-        let std = sqrt ((Params.a *. Params.b) /. ((Params.a +. Params.b) ** 2.) *. (Params.a +. Params.b +. 1.)) in
-        0.05 *. std
+        (* let std = sqrt ((Params.a *. Params.b) /. ((Params.a +. Params.b) ** 2.) *. (Params.a +. Params.b +. 1.)) in *)
+        (* 5. *. std *)
+        0.25
       let start = 
         let mean = Params.a /. (Params.a +. Params.b) in
         if constraints = [] then mean
         else closest mean constraints
+      let to_burn = 10000
     end)
 end
 
@@ -468,11 +513,12 @@ module Gamma
           | Some l -> l
       let step =
         let std = Params.theta *. sqrt Params.k in
-        0.05 *. std
+        5. *. std
       let start = 
         let mean = Params.k *. Params.theta in
         if constraints = [] then mean
         else closest mean constraints
+      let to_burn = 10000
     end)
 end
 
@@ -491,11 +537,12 @@ module Gaussian
           | Some l -> l
       let step =
         let std = Params.sigma in
-        0.05 *. std
+        5. *. std
       let start = 
         let mean = Params.mu in
         if constraints = [] then mean
         else closest mean constraints
+      let to_burn = 10000
     end)
 end
 
@@ -545,12 +592,13 @@ module LogNormal
           | None -> []
           | Some l -> l
       let step = 
-        let std = (exp (Params.sigma ** 2.) -. 1.) *. exp ((2. *. Params.mu) +. (Params.sigma ** 2.)) in
-        0.05 *. std
+        let std = ((exp (Params.sigma ** 2.)) -. 1.) *. exp ((2. *. Params.mu) +. (Params.sigma ** 2.)) in
+        5. *. std
       let start = 
         let mean = exp (Params.mu +. ((Params.sigma ** 2.) /. 2.)) in
         if constraints = [] then mean
         else closest mean constraints
+      let to_burn = 10000
     end)
 end
 
@@ -587,6 +635,6 @@ module Uniform
 end
 
 
-(* Example user code *)
+(* Example *)
 
 module My_Bernoulli = Bernoulli (struct let p = 0.5 end) (struct let c = None end)
