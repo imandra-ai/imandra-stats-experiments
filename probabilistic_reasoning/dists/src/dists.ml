@@ -103,6 +103,16 @@ let closest m cs =
           else
             loop curr dist t
   in loop 0. 0. cs
+
+let rec get_domain_size c d =
+  match c with
+    | [] -> d
+    | (a, b) :: t -> get_domain_size t ((b -. a) +. d)
+
+let rec make_inclusive c c_inclusive =
+  match c with
+    | [] -> c_inclusive
+    | (a, b) :: t -> make_inclusive t ((a - 1, b) :: c_inclusive)
   
 
 (* Primitive random elements *)
@@ -283,16 +293,14 @@ let inverse_transform_sample qf (u_rs, n_w_rs) =
     
 let mcmc_sample pdf bounds constraints cur_x step =
   let (lower, upper) = bounds in
-  let rec apply_constraints rs prev p =
-    let (a, b) = prev in
+  let rec apply_constraints rs (a, b) p =
     match rs with
-      | h :: t -> 
-        let (c, d) = h in
+      | (c, d) :: t -> 
         if p < c then 
           match a, b with
             | _, Some f_b ->
               let q = c +. (p -. f_b) in
-              apply_constraints rs prev q
+              apply_constraints rs (a, b) q
             | _, _ -> None
         else if p <= d then
           Some p
@@ -365,6 +373,10 @@ module Sampler = struct
             if (b_num - 1) mod batch = 0 then
               let rate = a' /. (a' +. r') in
               let diff = 1. +. (rate -. (1./.3.)) in
+
+              print_string ("Rate: " ^ string_of_float rate ^ "\n");
+              print_string ("Step: " ^ string_of_float b_step ^ " --> " ^ string_of_float (diff *. b_step) ^ "\n");
+
               burn (b_num - 1) s (diff *. b_step) 0. 0.
             else
               burn (b_num - 1) s b_step a' r'
@@ -396,7 +408,7 @@ module Bernoulli
       let constraints = 
         match Constraints.c with
           | None -> [], []
-          | Some b -> if b then [(0., 0.)], [1.] else [(1., 1.)], [1.]
+          | Some b -> if b then [(1., 1.)], [1.] else [(0., 0.)], [1.]
     end)
 end
 
@@ -417,12 +429,15 @@ module Beta
       let step =
         (* let std = sqrt ((Params.a *. Params.b) /. ((Params.a +. Params.b) ** 2.) *. (Params.a +. Params.b +. 1.)) in *)
         (* 5. *. std *)
-        0.25
+        if constraints = [] then
+          0.2
+        else
+          1. *. get_domain_size constraints 0.
       let start = 
         let mean = Params.a /. (Params.a +. Params.b) in
         if constraints = [] then mean
         else closest mean constraints
-      let to_burn = 10000
+      let to_burn = if constraints = [] then 10000 else 0
     end)
 end
 
@@ -440,7 +455,7 @@ module Binomial
       let constraints = 
         match Constraints.c with
           | None -> [], []
-          | Some l -> get_uniform_constraints l cdf
+          | Some l -> get_uniform_constraints (make_inclusive l []) cdf
     end)
 end
 
@@ -512,13 +527,16 @@ module Gamma
           | None -> []
           | Some l -> l
       let step =
-        let std = Params.theta *. sqrt Params.k in
-        5. *. std
+        if constraints = [] then
+          let std = Params.theta *. sqrt Params.k in
+          5. *. std
+        else
+          0.2 *. get_domain_size constraints 0.
       let start = 
         let mean = Params.k *. Params.theta in
         if constraints = [] then mean
         else closest mean constraints
-      let to_burn = 10000
+      let to_burn = if constraints = [] then 10000 else 0
     end)
 end
 
@@ -536,13 +554,17 @@ module Gaussian
           | None -> []
           | Some l -> l
       let step =
-        let std = Params.sigma in
-        5. *. std
+        if constraints = [] then
+          let std = Params.sigma in
+          5. *. std
+        else
+          0.2 *. get_domain_size constraints 0.
       let start = 
         let mean = Params.mu in
         if constraints = [] then mean
         else closest mean constraints
-      let to_burn = 10000
+      let to_burn = 
+        if constraints = [] then 10000 else 0
     end)
 end
 
@@ -592,13 +614,16 @@ module LogNormal
           | None -> []
           | Some l -> l
       let step = 
-        let std = ((exp (Params.sigma ** 2.)) -. 1.) *. exp ((2. *. Params.mu) +. (Params.sigma ** 2.)) in
-        5. *. std
+        if constraints = [] then
+          let std = ((exp (Params.sigma ** 2.)) -. 1.) *. exp ((2. *. Params.mu) +. (Params.sigma ** 2.)) in
+          5. *. std
+        else
+          0.5 *. get_domain_size constraints 0.
       let start = 
         let mean = exp (Params.mu +. ((Params.sigma ** 2.) /. 2.)) in
         if constraints = [] then mean
         else closest mean constraints
-      let to_burn = 10000
+      let to_burn = if constraints = [] then 10000 else 0
     end)
 end
 
@@ -614,7 +639,7 @@ module Poisson
       let constraints = 
         match Constraints.c with
           | None -> [], []
-          | Some l -> get_uniform_constraints l cdf
+          | Some l -> get_uniform_constraints (make_inclusive l []) cdf
     end)
 end
 
@@ -633,8 +658,3 @@ module Uniform
           | Some l -> get_uniform_constraints l cdf
     end)
 end
-
-
-(* Example *)
-
-module My_Bernoulli = Bernoulli (struct let p = 0.5 end) (struct let c = None end)

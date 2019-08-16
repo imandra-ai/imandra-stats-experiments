@@ -38,23 +38,23 @@ functions = ["q_bernoulli",
             "d_lognormal"]
 
 dists = {\
-        "bernoulli": st.bernoulli(0.3),
+        # "bernoulli": st.bernoulli(0.3),
         "beta": st.beta(2.3, 4.9),
-        "binomial": st.binom(40, 0.62),
-        "categorical": None,
-        "cauchy": st.cauchy(6.2, 1.1),
-        "exponential": st.expon(scale=1/3.76),
+        # "binomial": st.binom(40, 0.62),
+        # "categorical": None,
+        # "cauchy": st.cauchy(6.2, 1.1),
+        # "exponential": st.expon(scale=1/3.76),
         "gamma": st.gamma(4.3),
         "gaussian": st.norm(100, 15),
-        "laplace": st.laplace(-13.9, 4.4),
-        "logistic": st.logistic(0.9, 0.22),
-        # "lognormal": st.lognorm(0.8, 0, np.exp(0.2)),
-        "poisson": st.poisson(14.5),
-        "uniform": st.uniform(-209.6, 44.7 - 209.6)
+        # "laplace": st.laplace(-13.9, 4.4),
+        # "logistic": st.logistic(0.9, 0.22),
+        "lognormal": st.lognorm(0.8, 0, np.exp(0.2)),
+        # "poisson": st.poisson(14.5),
+        # "uniform": st.uniform(-209.6, 44.7 - 209.6)
         }
 
 const = {"bernoulli": [(0,0)],
-        "beta": [(-0.1,0.28), (0.34,0.38), (0.5,0.9)],
+        "beta": [(0,0.28), (0.34,0.38), (0.5,0.9)],
         "binomial": [(0,7), (12,12), (17,26), (30,40)],
         "categorical": [(1,1), (2,2), (5,5)],
         "cauchy": [(0.,5.4), (12.,13.)],
@@ -62,10 +62,10 @@ const = {"bernoulli": [(0,0)],
         "gamma": [(11,20), (24,100)],
         "gaussian": [(30.,50.), (100.,150.), (155.,170.)],
         "laplace": [(-20,-10)],
-        "logistic": [(-0.3,0), (0.5,0.81), (1.5,15)],
+        "logistic": [(0.5,0.81), (1.5,4)],
         "lognormal": [(3.22,3.28), (3.57,3.67)],
-        "poisson": [(4,12), (16,18), (30,60)],
-        "uniform": [(-141.3,-141.3), (-101.1,-75.5), (-50.6,-26.7)]}
+        "poisson": [(4,12), (16,18), (30,40)],
+        "uniform": [(-101.1,-75.5), (-50.6,-44.7)]}
 
 qf_range = np.linspace(0,1,101)
 
@@ -141,44 +141,47 @@ def make_plots(use_constraints=False):
         # Load samples and create plot
         if use_constraints:
             data = constraints
+            plots = constraint_plots
         else:
             data = samples
-        s = np.loadtxt(data + dist + ".csv")
-       
+            plots = sample_plots
 
+        s = np.loadtxt(data + dist + ".csv")
         s.sort()
         fig, ax = plt.subplots() 
         
         # Discrete dists
         if dist in ["bernoulli","binomial","poisson","categorical"]:
+
             if dist == "bernoulli" or dist == "categorical":
                 d = None
                 w = (1 / s.size) * np.ones(s.shape)
             else:
                 d = True
                 w = None
-            # x = range(int(s.min()), int(s.max()) + 1)
+
+            minn = int(s.min())
+            maxx = int(s.max())
             x = np.unique(s)
-            ax.hist(s, bins=len(x), density=d, weights=w, label='Samples')
+            b = max(1, maxx - minn)
+            ax.hist(s, bins=b, density=d, weights=w, label='Samples')
+
             if dist == "categorical":
                 pmf = np.array([0.1,0.6,0.02,0.08,0.2])
-
                 if use_constraints:
                     pmf = np.array([i / (0.1 + 0.6 + 0.2) for i in [0.1, 0.6, 0.2]])
-
             else:
                 pmf = dists[dist].pmf(x)
-                
                 if use_constraints:
-                    area = 0
-                    for (c1, c2) in const[dist]:
-                        points = list(range(int(c1),int(c2)+1))
-                        domain = (c2 - c1)
-                        area += domain * sum([dists[dist].pmf(x) for x in points]) / len(points)
-
-                    print("{} scaling factor: {}".format(dist,area))
-
-                    pmf /= area
+                    if dist == "bernoulli":
+                        pmf = [1]
+                    else:
+                        area = sum([dists[dist].pmf(y) for y in x])
+                        print("{} scaling factor: {}".format(dist,area))
+                        pmf /= area
+                        for (c1, c2) in const[dist]:
+                            ax.axvline(x=c1, color='Green')
+                            ax.axvline(x=c2+1, color='Green')
 
             ax.plot(x, pmf, 'o', label='PMF', color='Red')
 
@@ -189,8 +192,7 @@ def make_plots(use_constraints=False):
                 b = 100
             if dist == "uniform":
                 pdf = np.linspace(-1/(44.7 - 209.6),-1/(44.7 - 209.6),10000)
-                pdf /= (pdf.sum() * ((s.max() - s.min()) / s.size))
-                b = 25
+                b = 50
             elif dist == "gamma":
                 pdf = (1/3.4) * dists[dist].pdf((1/3.4) * s)
                 b = 100
@@ -198,31 +200,26 @@ def make_plots(use_constraints=False):
                 pdf = dists[dist].pdf(s)
                 b = 100
 
-            if use_constraints:
-                area = 0
-                for (c1, c2) in const[dist]:
-                    points = np.linspace(c1, c2, 1000)
-                    domain = (c2 - c1)
-                    if dist == "gamma":
-                        area += domain * ((1/3.4) * (dists[dist].pdf((1/3.4) * points))).sum() / points.size
-                    else:
-                        area += domain * (dists[dist].pdf(points)).sum() / points.size
-           
+            if use_constraints:  
+                if dist != "uniform":
+                    area = 0
+                    for (c1, c2) in const[dist]:
+                        points = np.linspace(c1, c2, 1000)
+                        domain = (c2 - c1)
+                        if dist == "gamma":
+                            area += domain * ((1/3.4) * (dists[dist].pdf((1/3.4) * points))).sum() / points.size
+                        else:
+                            area += domain * (dists[dist].pdf(points)).sum() / points.size
+                else:
+                    area = - sum([b - a for (a, b) in const[dist]]) / (44.7 - 209.6)
                 print("{} scaling factor: {}".format(dist,area))
-
                 pdf /= area
+                for (c1, c2) in const[dist]:
+                    ax.axvline(x=c1, color='Green')
+                    ax.axvline(x=c2, color='Green')
 
             ax.plot(s, pdf, '.', label='PDF', color='Red')
             ax.hist(s, bins=b, density=True, label='Samples')
-
-        # Plot constraints
-        if use_constraints:
-            plots = constraint_plots
-            for (a, b) in const[dist]:
-                ax.axvline(x=a, color='Green')
-                ax.axvline(x=b, color='Green')
-        else:
-            plots = sample_plots
 
         # Save image
         ax.legend()
@@ -267,5 +264,3 @@ if __name__ == "__main__":
     # plot_function_tests()
     # make_plots()
     make_plots(use_constraints=True)
-
-
