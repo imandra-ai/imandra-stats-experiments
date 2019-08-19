@@ -69,17 +69,48 @@ let constrain_categorical (constraints) (classes, probs) =
   if sum new_p = 0. then failwith "Constrained classes have zero total probability mass"
   else new_c, (normalise new_p)
 
-let get_uniform_constraints rs cdf =
-  let rec loop rs u_rs w_rs =
+
+let constraint_comparison (a, b) (a', b') =
+  if compare a a' <> 0 then compare a a' else compare b b'
+
+let get_uniform_constraints l cdf =
+  let sorted = List.sort constraint_comparison l in
+  let rec loop rs u_rs w_rs last_b =
 	match rs with
 	  | [] -> (u_rs, w_rs)
 	  | (a, b) :: t -> 
-		let (c_a, c_b) = (cdf a, cdf b) in
-		let w = c_b -. c_a in
-		loop t ((c_a, c_b) :: u_rs) (w :: w_rs)
-  in let (u_rs, w_rs) = loop rs [] [] in
+        let new_b =
+        match last_b with
+          | None -> a
+          | Some b' -> b' in
+        if b < a then failwith "Each constraint (a, b) must be such that b >= a"
+        else if a < new_b then failwith "Constraints must not overlap"
+        else
+		  let (c_a, c_b) = (cdf a, cdf b) in
+		  let w = c_b -. c_a in
+		  loop t ((c_a, c_b) :: u_rs) (w :: w_rs) (Some b)
+  in let (u_rs, w_rs) = loop sorted [] [] None in
   if sum w_rs = 0. then failwith "Constrained regions have zero total probability mass"
   else u_rs, (normalise w_rs)
+
+let process_constraints l =
+  let sorted = List.sort constraint_comparison l in
+  let rec loop l' low high domain_size last_b =
+    match l' with
+      | [] -> sorted, (low, high), (domain_size /. (high -. low))
+      | (a, b) :: t ->
+        let new_b =
+        match last_b with
+          | None -> a
+          | Some b' -> b' in
+        if b < a then failwith "Each constraint (a, b) must be such that b >= a"
+        else if a < new_b then failwith "Constraints must not overlap"
+        else
+          let new_low = min a low in
+          let new_high = max b high in
+          let new_domain_size = domain_size +. (b -. a) in
+          loop t new_low new_high new_domain_size (Some b)
+  in loop sorted max_float min_float 0. None
 
 let closest m cs =
   let rec loop curr dist list =
@@ -103,11 +134,6 @@ let closest m cs =
           else
             loop curr dist t
   in loop 0. 0. cs
-
-let rec get_domain_size c d =
-  match c with
-    | [] -> d
-    | (a, b) :: t -> get_domain_size t ((b -. a) +. d)
 
 let rec make_inclusive c c_inclusive =
   match c with
@@ -291,34 +317,31 @@ let inverse_transform_sample qf (u_rs, n_w_rs) =
 	| _, _ -> let (r1, r2) = q_categorical (base ()) ~classes:u_rs ~probs:n_w_rs in
               base ~a:r1 ~b:r2 () |> qf
     
-let mcmc_sample pdf bounds constraints cur_x step =
+let mcmc_sample pdf constraints bounds gradient cur_x step =
   let (lower, upper) = bounds in
-  let rec apply_constraints rs (a, b) p =
-    match rs with
-      | (c, d) :: t -> 
-        if p < c then 
-          match a, b with
-            | _, Some f_b ->
-              let q = c +. (p -. f_b) in
-              apply_constraints rs (a, b) q
-            | _, _ -> None
-        else if p <= d then
-          Some p
-        else 
-          apply_constraints t (Some c, Some d) p
-      | _ -> None 
+  let rec apply_constraints p constraints prev =
+    match constraints with
+      | (a, b) :: t -> 
+        let new_region = prev +. ((b -. a) /. gradient) in
+        if p <= new_region then
+          Some (((p -. prev) *. gradient) +. a)
+        else
+          apply_constraints p t new_region
+      | [] -> None
   in let rec get_proposal () =
-    let epsilon = base ~a:(-.step) ~b:step () in
-    let new_x = cur_x +. epsilon in
+    let new_x = q_logistic ~mu:cur_x ~s:step (base ()) in
+    (* let epsilon = base ~a:(-.step) ~b:step () in *)
+    (* let new_x = cur_x +. epsilon in *)
     if new_x < lower || new_x > upper then
       get_proposal ()
     else if constraints = [] then
       new_x
     else
-      let result = apply_constraints constraints (None, None) new_x in
+      let result = apply_constraints new_x constraints lower in
       match result with
         | None -> get_proposal ()
-        | Some f -> f
+        | Some f -> f 
+
   in let new_x = get_proposal () in
   let ratio = (pdf new_x) /. (pdf cur_x) in
   if base () <= ratio then new_x else cur_x
@@ -338,8 +361,9 @@ end
 module type MCMC_S = sig
   type value
   val pdf : float -> float
-  val bounds : float * float
   val constraints : (float * float) list
+  val bounds : float * float
+  val gradient : float
   val start : float
   val step : float
   val to_burn : int
@@ -363,21 +387,22 @@ module Sampler = struct
   end
   module Make_MCMC (D : MCMC_S) : S with type value = float = struct
     type value = float
-    let batch = D.to_burn / 10
+    let batch = D.to_burn / 20
+    let lower, upper = D.bounds
+    let max_step = (upper -. lower)
     let rec burn b_num b_last b_step a r =
         match b_num with
           | 0 -> b_step
           | _ -> 
-            let s = mcmc_sample D.pdf D.bounds D.constraints b_last b_step in 
+            let s = mcmc_sample D.pdf D.constraints D.bounds D.gradient b_last b_step in 
             let a', r' = if s = b_last then a, r +. 1. else a +. 1., r in
             if (b_num - 1) mod batch = 0 then
               let rate = a' /. (a' +. r') in
               let diff = 1. +. (rate -. (1./.3.)) in
-
-              print_string ("Rate: " ^ string_of_float rate ^ "\n");
-              print_string ("Step: " ^ string_of_float b_step ^ " --> " ^ string_of_float (diff *. b_step) ^ "\n");
-
-              burn (b_num - 1) s (diff *. b_step) 0. 0.
+              let new_step = min (diff *. b_step) max_step in
+              (* print_string ("Rate: " ^ string_of_float rate ^ "\n"); *)
+              (* print_string ("Step: " ^ string_of_float b_step ^ " --> " ^ string_of_float (new_step) ^ "\n"); *)
+              burn (b_num - 1) s new_step 0. 0.
             else
               burn (b_num - 1) s b_step a' r'
     let burn_in_step = burn D.to_burn D.start D.step 0. 0.
@@ -386,7 +411,7 @@ module Sampler = struct
         match num with
           | 0 -> samples
           | _ -> 
-            let s = mcmc_sample D.pdf D.bounds D.constraints last step in 
+            let s = mcmc_sample D.pdf D.constraints D.bounds D.gradient last step in 
             if s = last then loop (s :: samples) (num - 1) s a (r + 1)
             else loop (s :: samples) (num - 1) s (a + 1) r
       in loop [] n start 0 0
@@ -421,23 +446,17 @@ module Beta
     include Sampler.Make_MCMC (struct
       type value = float
       let pdf x = d_beta x ~a:Params.a ~b:Params.b
-      let bounds = (0., 1.)
-      let constraints = 
+      let constraints, bounds, gradient = 
         match Constraints.c with
-          | None -> []
-          | Some l -> l
+          | None -> [], (0., 1.), 0.
+          | Some l -> process_constraints l
       let step =
-        (* let std = sqrt ((Params.a *. Params.b) /. ((Params.a +. Params.b) ** 2.) *. (Params.a +. Params.b +. 1.)) in *)
-        (* 5. *. std *)
-        if constraints = [] then
-          0.2
-        else
-          1. *. get_domain_size constraints 0.
+        let lower, upper = bounds in 0.2 *. (upper -. lower)
       let start = 
         let mean = Params.a /. (Params.a +. Params.b) in
         if constraints = [] then mean
         else closest mean constraints
-      let to_burn = if constraints = [] then 10000 else 0
+      let to_burn = if true then 20000 else 0
     end)
 end
 
@@ -521,22 +540,20 @@ module Gamma
     include Sampler.Make_MCMC (struct
       type value = float
       let pdf x = d_gamma x ~k:Params.k ~theta:Params.theta
-      let bounds = (0., max_float)
-      let constraints = 
+      let constraints, bounds, gradient = 
         match Constraints.c with
-          | None -> []
-          | Some l -> l
+          | None -> [], (0., max_float), 0.
+          | Some l -> process_constraints l
       let step =
-        if constraints = [] then
-          let std = Params.theta *. sqrt Params.k in
-          5. *. std
-        else
-          0.2 *. get_domain_size constraints 0.
+        let std = Params.theta *. sqrt Params.k in
+        let lower, upper = bounds in
+        if constraints = [] then 2.5 *. std
+        else min (0.2 *. (upper -. lower)) (2.5 *. std)
       let start = 
         let mean = Params.k *. Params.theta in
         if constraints = [] then mean
         else closest mean constraints
-      let to_burn = if constraints = [] then 10000 else 0
+      let to_burn = if true then 20000 else 0
     end)
 end
 
@@ -548,23 +565,21 @@ module Gaussian
     include Sampler.Make_MCMC (struct
       type value = float
       let pdf x = d_gaussian x ~mu:Params.mu ~sigma:Params.sigma
-      let bounds = (min_float, max_float)
-      let constraints = 
+      let constraints, bounds, gradient = 
         match Constraints.c with
-          | None -> []
-          | Some l -> l
+          | None -> [], (min_float, max_float), 0.
+          | Some l -> process_constraints l
       let step =
-        if constraints = [] then
-          let std = Params.sigma in
-          5. *. std
-        else
-          0.2 *. get_domain_size constraints 0.
+        let std = Params.sigma in
+        let lower, upper = bounds in
+        if constraints = [] then 2.5 *. std
+        else min (0.25 *. (upper -. lower)) (2.5 *. std)
       let start = 
         let mean = Params.mu in
         if constraints = [] then mean
         else closest mean constraints
       let to_burn = 
-        if constraints = [] then 10000 else 0
+        if true then 20000 else 0
     end)
 end
 
@@ -608,22 +623,20 @@ module LogNormal
     include Sampler.Make_MCMC (struct
       type value = float
       let pdf x = d_lognormal x ~mu:Params.mu ~sigma:Params.sigma
-      let bounds = (0., max_float)
-      let constraints = 
+      let constraints, bounds, gradient = 
         match Constraints.c with
-          | None -> []
-          | Some l -> l
-      let step = 
-        if constraints = [] then
-          let std = ((exp (Params.sigma ** 2.)) -. 1.) *. exp ((2. *. Params.mu) +. (Params.sigma ** 2.)) in
-          5. *. std
-        else
-          0.5 *. get_domain_size constraints 0.
+          | None -> [], (0., max_float), 0.
+          | Some l -> process_constraints l
+      let step =
+        let std = ((exp (Params.sigma ** 2.)) -. 1.) *. exp ((2. *. Params.mu) +. (Params.sigma ** 2.)) in
+        let lower, upper = bounds in
+        if constraints = [] then 2.5 *. std
+        else min (0.25 *. (upper -. lower)) (2.5 *. std)
       let start = 
         let mean = exp (Params.mu +. ((Params.sigma ** 2.) /. 2.)) in
         if constraints = [] then mean
         else closest mean constraints
-      let to_burn = if constraints = [] then 10000 else 0
+      let to_burn = if true then 20000 else 0
     end)
 end
 

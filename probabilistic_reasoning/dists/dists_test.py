@@ -60,7 +60,7 @@ const = {"bernoulli": [(0,0)],
         "cauchy": [(0.,5.4), (12.,13.)],
         "exponential": [(0.4,0.99), (2.01,2.8)],
         "gamma": [(11,20), (24,100)],
-        "gaussian": [(30.,50.), (100.,150.), (155.,170.)],
+        "gaussian": [(30,50), (60,70), (80,90), (100,150), (155,170)],
         "laplace": [(-20,-10)],
         "logistic": [(0.5,0.81), (1.5,4)],
         "lognormal": [(3.22,3.28), (3.57,3.67)],
@@ -170,11 +170,17 @@ def make_plots(use_constraints=False):
                 pmf = np.array([0.1,0.6,0.02,0.08,0.2])
                 if use_constraints:
                     pmf = np.array([i / (0.1 + 0.6 + 0.2) for i in [0.1, 0.6, 0.2]])
+                    ax.axvline(x=1, color='Green')
+                    ax.axvline(x=3, color='Green')
+                    ax.axvline(x=4, color='Green')
+                    ax.axvline(x=5, color='Green')
             else:
                 pmf = dists[dist].pmf(x)
                 if use_constraints:
                     if dist == "bernoulli":
                         pmf = [1]
+                        ax.axvline(x=0.5, color='Green')
+                        ax.axvline(x=1.5, color='Green')
                     else:
                         area = sum([dists[dist].pmf(y) for y in x])
                         print("{} scaling factor: {}".format(dist,area))

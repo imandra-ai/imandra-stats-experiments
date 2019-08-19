@@ -84,13 +84,13 @@ module My_Uniform = Uniform (struct let a = -209.6 let b = -44.7 end) (struct le
 (* Sampling modules with constraints *)
 
 module My_Bernoulli = Bernoulli (struct let p = 0.3 end) (struct let c = Some false end)
-module My_Beta = Beta (struct let a = 2.3 let b = 4.9 end) (struct let c = Some [(-0.,0.28); (0.34,0.38); (0.5,0.9)] end)
+module My_Beta = Beta (struct let a = 2.3 let b = 4.9 end) (struct let c = Some [(0.,0.28); (0.34,0.38); (0.5,0.9)] end)
 module My_Binomial = Binomial (struct let n = 40 let p = 0.62 end) (struct let c = Some [(0,7); (12,12); (17,26); (30,40)] end)
 module My_Categorical = Categorical (struct type t = int let classes = [1;2;3;4;5] let probs = [0.1;0.6;0.02;0.08;0.2] end) (struct type t = int let c = Some [1; 2; 5] end)
 module My_Cauchy = Cauchy (struct let x_0 = 6.2 let gamma = 1.1 end) (struct let c = Some [(0.,5.4); (12.,13.)] end)
 module My_Exponential = Exponential (struct let lambda = 3.76 end) (struct let c = Some [(0.4,0.99); (2.01,2.8)] end)
 module My_Gamma = Gamma (struct let k = 4.3 let theta = 3.4 end) (struct let c = Some [(11.,20.); (24.,100.)] end)
-module My_Gaussian = Gaussian (struct let mu = 100. let sigma = 15. end) (struct let c = Some [(30.,50.); (60.,70.); (80.,90.);  (100.,150.); (155.,170.)] end)
+module My_Gaussian = Gaussian (struct let mu = 100. let sigma = 15. end) (struct let c = Some [(30.,50.); (60.,70.); (80.,90.); (100.,150.); (155.,170.)] end)
 module My_Laplace = Laplace (struct let mu = -13.9 let b = 4.4 end) (struct let c = Some [(-20.,-10.)] end)
 module My_Logistic = Logistic (struct let mu = 0.9 let s = 0.22 end) (struct let c = Some [(0.5,0.81); (1.5,4.)] end)
 module My_LogNormal = LogNormal (struct let mu = 0.2 let sigma = 0.8 end) (struct let c = Some [(3.22,3.28); (3.57,3.67)] end)
@@ -115,14 +115,13 @@ let inverse_transform () =
 (* MCMC sampling tests *)
 
 let mcmc () =
-  save (My_Beta.sample 100000) "beta.csv";
-  save (My_Gamma.sample 100000) "gamma.csv";
-  save (My_Gaussian.sample 100000) "gaussian.csv";
-  save (My_LogNormal.sample 100000) "lognormal.csv"
+  save (My_Beta.sample 30000) "beta.csv";
+  save (My_Gamma.sample 30000) "gamma.csv";
+  save (My_Gaussian.sample 30000) "gaussian.csv";
+  save (My_LogNormal.sample 30000) "lognormal.csv"
 
 
 (* Run tests *)
 
 let run_function_checks () = save_qfs (); save_cdfs (); save_pdfs ()
-
 let run_sampling_checks () = inverse_transform (); mcmc ()
