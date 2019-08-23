@@ -3,42 +3,20 @@ Lewis Hammond - lewis@imandra.ai
 2019 *)
 
 
-(* let (+~) x y = Caml.(+) x y
-let (-~) x y = Caml.(-) x y
-let ( *~) x y = Caml.( * ) x y
-let (/~) x y = Caml.(/) x y
-let (+.~) x y = Caml.(+.) x y
-let (-.~) x y = Caml.(-.) x y
-let ( *.~) x y = Caml.( *.) x y
-let (/.~) x y = Caml.(/.) x y
-let (<=~) x y = Caml.(<=) x y
-let (<~) x y = Caml.(<) x y
-let (<>~) x y = Caml.(<>) x y *)
-
 (* Constants *)
 
 let pi = 4. *. (atan 1.)
 
 let log_2_pi = log (2. *. pi) 
 
-let max_rs_int = (int_of_float (2. ** 30.)) - 1
+let max_int_bits = (int_of_float (2. ** 30.)) - 1
 
-let max_rs_float = (2. ** 60.) -. 1.
-
-let half_max_decimal_float = int_of_float ((2. ** 23.) -. 1.)
+let bits_26 = (int_of_float (2. ** 26.))
 
 let q0 = Q.zero
 
 
-  let rawfloat s =
-    let scale = 1073741824.0  (* 2^30 *)
-    and r1 = Pervasives.float (bits s)
-    and r2 = Pervasives.float (bits s)
-    in (r1 /. scale +. r2) /. scale
-  ;;
-
-
-(* OCaml standard library PRNG *)
+(* OCaml standard PRNG *)
 
 module RS = Random.State
 
@@ -46,40 +24,34 @@ type st = RS.t
 
 let default_seed = [| 19841983; 7298712389; 17862387612 |]
 
-let make ?(seed=default_seed) () =
-  RS.make seed
-
-let make_self_init () = 
-  RS.make_self_init ()
-
 let prng = RS.make default_seed
-
-type 'a t = RS.t -> 'a
 
 let rs_bool st () = RS.bool st
 
-let rs_int st ?(bound = max_rs_int) () = 
+let rs_int st ?(bound = max_int_bits) () = 
   let i = (RS.int st bound) in
   if rs_bool st () then i
   else -i
 
-let rs_Z st ?(bound = max_rs_int) () = 
+let rs_Z st ?(bound = max_int_bits) () = 
   let i = rs_int st ~bound () in Z.of_int i
 
-let rs_float st ?(bound = max_rs_float) () =
+let rs_float st ?(bound = float_of_int max_int_bits) () =
   let f = RS.float st bound in
   if rs_bool st () then f
   else -.f
 
-let rs_Q st ?(bound = max_rs_float) () =
-  let f = rs_float st ~bound () in Q.of_float f
+let rs_Q st ?(bound = Q.of_int max_int_bits) () =
+  let n = rs_Z () in
+  let d = rs_Z () in
+  Q.mul {num:n; den:d} bound
 
 let rs_base st ?(a = 0.) ?(b = 1.) () = 
-  if a <= b then a +. RS.float st (b -. a)
-  else failwith "Cannot sample from base of negative range"
+  if a > b then failwith "Cannot sample from base of negative range"   
+  else a +. RS.float st (b -. a)
 
 
-(* Cryptographic PRNG *)
+(* Nocrypto PRNG *)
 
 module NC = Nocrypto.Rng
 
@@ -89,72 +61,42 @@ let nc_bool () =
   let b = NC.Int.gen_bits 1 in 
   if b = 0 then false else true
 
-let nc_int ?(bound = max_rs_int) () = 
+let nc_int ?(bound = max_int_bits) () = 
   let i = (NC.Int.gen bound) in
   if nc_bool () then i
   else -i
 
-let nc_Z ?(bound = Z.of_int max_rs_int) () =
-  let z = (NC.Z.gen bound) in
+let nc_Z ?(bound = Z.of_int max_int_bits) () =
+  let z = NC.Z.gen bound in
   if nc_bool () then z
   else Z.neg z
-
-let nc_float ?(bound = max_rs_float) () = 
-  let a = float_of_int (NC.Int.gen half_max_decimal_float) in
-  let b = float_of_int (NC.Int.gen half_max_decimal_float) in
-  (a /. half_max_decimal_float +. b) /. half_max_decimal_float
-
-
-  let scale = 
   
-
-
-let rawfloat s =
-let scale = 1073741824.0  (* 2^30 *)
-and r1 = Pervasives.float (bits s)
-and r2 = Pervasives.float (bits s)
-in (r1 /. scale +. r2) /. scale
-
-
-let nc_Q ?(bound = max_float) () = ()
-
-
-
 let nc_base ?(a = 0.) ?(b = 1.) () = 
-  if a <= b then a +. nc_float (b -. a)
-  else failwith "Cannot sample from base of negative range"
+  if a > b then 
+	failwith "Cannot sample from base of negative range"
+  else 
+	let a = float_of_int (NC.Int.gen (pred bits_26)) in
+    let b = float_of_int (NC.Int.gen (pred bits_26)) in
+    let scale = float_of_int bits_26 in
+    let base = (a /. scale +. b) /. scale in
+    (b -. a) *. base) +. a
 
-
-
-
-type st = RS.t
-
-type 'a t = RS.t -> 'a
-
-
-
-let rs_float st ?(bound = max_float) () =
-  let f = RS.float st bound in
-  if rs_bool st () then f
+let nc_float ?(bound = float_of_int max_int_bits) () = 
+  let f = nc_base ~a:0. ~b:bound () in
+  if nc_bool () then f
   else -.f
-
-let rs_Q st ?(bound = max_float) () =
-  let f = rs_float st ~bound () in Q.of_float f
-
-let rs_base st ?(a = 0.) ?(b = 1.) () = 
-  if a <= b then a +. RS.float st (b -. a)
-  else failwith "Cannot sample from base of negative range"
+ 
+let nc_Q ?(bound = Q.of_int max_int_bits) () =
+  let n = nc_Z () in
+  let d = nc_Z () in
+  Q.mul {num:n; den:d} bound
 
 
-(* Primitive random elements *)
+(* Primitive random element *)
 
-let base ?(st = prng) ?(a = 0.) ?(b = 1.) () = rs_base st ~a ~b ()
+let base ?(a = 0.) ?(b = 1.) () = rs_base prng ~a ~b ()
 
-
-
-(* let max_rs_float = 2. ^ 64. -. 1. *)
-
-
+let base ?(a = 0.) ?(b = 1.) () = nc_base ~a ~b ()
 
 
 (* Helper functions *)
