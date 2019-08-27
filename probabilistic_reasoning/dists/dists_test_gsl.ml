@@ -38,8 +38,12 @@ let save_qfs () =
   save (List.map (q_laplace ~mu:(-.53.) ~b:12.) qf_range) "q_laplace.csv";
   save (List.map (q_logistic ~mu:(-.0.004) ~s:0.02) qf_range) "q_logistic.csv";
   save (List.map float (List.map (q_poisson ~lambda:4.3) qf_range)) "q_poisson.csv";
-  save (List.map (q_uniform ~a:13.444 ~b:56.876) qf_range) "q_uniform.csv"
+  save (List.map (q_uniform ~a:13.444 ~b:56.876) qf_range) "q_uniform.csv";
 
+  save (List.map (q_beta ~a:0.4 ~b:1.8) qf_range) "q_beta.csv";
+  save (List.map (q_gamma ~k:4.8 ~theta:3.22) qf_range) "q_gamma.csv";
+  save (List.map (q_gaussian ~mu:134.77 ~sigma:23.65) qf_range) "q_gaussian.csv";
+  save (List.map (q_lognormal ~mu:1.02 ~sigma:0.65) qf_range) "q_lognormal.csv"
 
 (* Test and save CDFs *)
 
@@ -52,7 +56,12 @@ let save_cdfs () =
   save (List.map (c_laplace ~mu:3.01 ~b:0.667) (range (-.1.22) 5.99 100)) "c_laplace.csv";
   save (List.map (c_logistic ~mu:15.9 ~s:4.32) (range (-.14.2) 53.29 100)) "c_logistic.csv";
   save (List.map (c_poisson ~lambda:36.3) (range 0. 100. 100)) "c_poisson.csv";
-  save (List.map (c_uniform ~a:(10.334) ~b:10009.8) (range (-.1440.2) 13000.4 100)) "c_uniform.csv"
+  save (List.map (c_uniform ~a:(10.334) ~b:10009.8) (range (-.1440.2) 13000.4 100)) "c_uniform.csv";
+
+  save (List.map (c_beta ~a:4.5 ~b:6.9) qf_range) "c_beta.csv";
+  save (List.map (c_gamma ~k:1.8 ~theta:0.5) qf_range) "c_gamma.csv";
+  save (List.map (c_gaussian ~mu:(-.167.9) ~sigma:7.6) qf_range) "c_gaussian.csv";
+  save (List.map (c_lognormal ~mu:3.6 ~sigma:5.7) qf_range) "c_lognormal.csv"
 
 
  (* Test and save PDFs *)
@@ -115,10 +124,10 @@ let inverse_transform () =
 (* MCMC sampling tests *)
 
 let mcmc () =
-  save (My_Beta.sample 30000) "beta.csv";
-  save (My_Gamma.sample 30000) "gamma.csv";
-  save (My_Gaussian.sample 30000) "gaussian.csv";
-  save (My_LogNormal.sample 30000) "lognormal.csv"
+  save (My_Beta.sample 10000) "beta.csv";
+  save (My_Gamma.sample 10000) "gamma.csv";
+  save (My_Gaussian.sample 10000) "gaussian.csv";
+  save (My_LogNormal.sample 10000) "lognormal.csv"
 
 
 (* Run tests *)

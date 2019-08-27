@@ -16,39 +16,49 @@ constraints = "dist_tests/constraints/"
 sample_plots = "dist_tests/sample_plots/"
 constraint_plots = "dist_tests/constraint_plots/"
 
-functions = ["q_bernoulli",
-            "q_binomial",
-            "q_cauchy",
-            "q_exponential",
-            "q_laplace",
-            "q_logistic",
-            "q_poisson",
-            "q_uniform",
-            "c_bernoulli",
-            "c_binomial",
-            "c_cauchy",
-            "c_exponential",
-            "c_laplace",
-            "c_logistic",
-            "c_poisson",
-            "c_uniform",
-            "d_beta",
-            "d_gamma",
-            "d_gaussian",
-            "d_lognormal"]
+functions = [\
+            # "q_bernoulli",
+            # "q_binomial",
+            # "q_cauchy",
+            # "q_exponential",
+            # "q_laplace",
+            # "q_logistic",
+            # "q_poisson",
+            # "q_uniform",
+            # "q_beta",
+            "q_gamma",
+            # "q_gaussian",
+            # "q_lognormal",
+            # "c_bernoulli",
+            # "c_binomial",
+            # "c_cauchy",
+            # "c_exponential",
+            # "c_laplace",
+            # "c_logistic",
+            # "c_poisson",
+            # "c_uniform",
+            # "c_beta",
+            "c_gamma",
+            # "c_gaussian",
+            # "c_lognormal",
+            # "d_beta",
+            # "d_gamma",
+            # "d_gaussian",
+            # "d_lognormal"\
+            ]
 
 dists = {\
-        # "bernoulli": st.bernoulli(0.3),
-        "beta": st.beta(2.3, 4.9),
+        "bernoulli": st.bernoulli(0.3),
+        # "beta": st.beta(2.3, 4.9),
         # "binomial": st.binom(40, 0.62),
-        # "categorical": None,
+        "categorical": None,
         # "cauchy": st.cauchy(6.2, 1.1),
         # "exponential": st.expon(scale=1/3.76),
-        "gamma": st.gamma(4.3),
-        "gaussian": st.norm(100, 15),
+        # "gamma": st.gamma(4.3),
+        # "gaussian": st.norm(100, 15),
         # "laplace": st.laplace(-13.9, 4.4),
         # "logistic": st.logistic(0.9, 0.22),
-        "lognormal": st.lognorm(0.8, 0, np.exp(0.2)),
+        # "lognormal": st.lognorm(0.8, 0, np.exp(0.2)),
         # "poisson": st.poisson(14.5),
         # "uniform": st.uniform(-209.6, 44.7 - 209.6)
         }
@@ -87,6 +97,13 @@ def save_qfs():
     save(st.poisson.ppf(qf_range, 4.3), "q_poisson.csv")
     save(st.uniform.ppf(qf_range, 13.444, 56.876 - 13.444), "q_uniform.csv")
 
+    save(st.beta.ppf(qf_range, 0.4, 1.8), "q_beta.csv")
+    save(st.gamma.ppf(qf_range, a=4.8, scale=3.22), "q_gamma.csv")
+    save(st.norm.ppf(qf_range, 134.77, 23.65), "q_gaussian.csv")
+    save(st.lognorm.ppf(qf_range, s=0.65, scale=np.exp(1.02)), "q_lognormal.csv")
+
+
+
 
 # Check CDFs
 
@@ -101,6 +118,10 @@ def save_cdfs():
     save(st.poisson.cdf(np.linspace(0, 100, 101), 36.3), "c_poisson.csv")
     save(st.uniform.cdf(np.linspace(-1440.2, 13000.4, 101), 10.334, 10009.8 - 10.334), "c_uniform.csv")
 
+    save(st.beta.cdf(qf_range, 4.5, 6.9), "c_beta.csv")
+    save(st.gamma.cdf(qf_range, a=1.8, scale=0.5), "c_gamma.csv")
+    save(st.norm.cdf(qf_range, -167.9 ,7.6), "c_gaussian.csv")
+    save(st.lognorm.cdf(qf_range, s=5.7, scale=np.exp(3.6)), "c_lognormal.csv")
 
 # Check PDFs
 
@@ -129,7 +150,7 @@ def plot_function_tests():
         diff = python_x - ocaml_x
         fig, ax = plt.subplots()
         ax.plot(diff)
-        fig.savefig(comparisons + f + "_density.png")
+        fig.savefig(comparisons + f + ".png")
 
 
 # Sampling tests
@@ -153,18 +174,21 @@ def make_plots(use_constraints=False):
         # Discrete dists
         if dist in ["bernoulli","binomial","poisson","categorical"]:
 
-            if dist == "bernoulli" or dist == "categorical":
-                d = None
-                w = (1 / s.size) * np.ones(s.shape)
-            else:
-                d = True
-                w = None
-
             minn = int(s.min())
             maxx = int(s.max())
             x = np.unique(s)
             b = max(1, maxx - minn)
-            ax.hist(s, bins=b, density=d, weights=w, label='Samples')
+
+            if dist == "bernoulli" or dist == "categorical":
+                d = None
+                w = (1 / s.size) * np.ones(s.shape)
+                if not use_constraints:
+                    b += 1
+            else:
+                d = True
+                w = None
+
+            ax.hist(s, bins=b+1, density=d, weights=w, label='Samples')
 
             if dist == "categorical":
                 pmf = np.array([0.1,0.6,0.02,0.08,0.2])
@@ -229,6 +253,7 @@ def make_plots(use_constraints=False):
 
         # Save image
         ax.legend()
+        print(plots + dist + ".png")
         fig.savefig(plots + dist + ".png")
 
 
@@ -268,5 +293,5 @@ if __name__ == "__main__":
 
     # run_function_tests()
     # plot_function_tests()
-    # make_plots()
-    make_plots(use_constraints=True)
+    make_plots()
+    # make_plots(use_constraints=True)

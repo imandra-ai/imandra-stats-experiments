@@ -3,6 +3,15 @@ Lewis Hammond - lewis@imandra.ai
 2019 *)
 
 
+(* Necessary modules *)
+
+module RS = Random.State
+
+module NC = Nocrypto.Rng
+
+module GSL = Gsl.Cdf
+
+
 (* Constants *)
 
 let pi = 4. *. (atan 1.)
@@ -17,8 +26,6 @@ let q0 = Q.zero
 
 
 (* OCaml standard PRNG *)
-
-module RS = Random.State
 
 type st = RS.t
 
@@ -53,8 +60,6 @@ let rs_base st ?(a = 0.) ?(b = 1.) () =
 
 (* Nocrypto PRNG *)
 
-module NC = Nocrypto.Rng
-
 let () = Nocrypto_entropy_unix.initialize ()
 
 let nc_bool () = 
@@ -75,10 +80,10 @@ let nc_base ?(a = 0.) ?(b = 1.) () =
   if a > b then 
 	failwith "Cannot sample from base of negative range"
   else 
-	let a = float_of_int (NC.Int.gen (pred bits_26)) in
-    let b = float_of_int (NC.Int.gen (pred bits_26)) in
+	let x = float_of_int (NC.Int.gen (pred bits_26)) in
+    let y = float_of_int (NC.Int.gen (pred bits_26)) in
     let scale = float_of_int bits_26 in
-    let base = (a /. scale +. b) /. scale in
+    let base = (x /. scale +. y) /. scale in
     (b -. a) *. base +. a
 
 let nc_float ?(bound = float_of_int max_int_bits) () = 
@@ -92,16 +97,23 @@ let nc_Q ?(bound = Q.of_int max_int_bits) () =
   Q.mul {num = n; den = d} bound
 
 
+(* GSL PRNG *)
+
+
+
+
 (* Primitive random element *)
 
 (* let base ?(a = 0.) ?(b = 1.) () = rs_base prng ~a ~b () *)
 
 let base ?(a = 0.) ?(b = 1.) () = nc_base ~a ~b ()
 
+(* let base ?(a = 0.) ?(b = 1.) () = gsl_base ~a ~b () *)
+
 
 (* Helper functions *)
 
-let bounded x = 0. <= x && x <= 1.
+let bounded x = x >= 0. && x <= 1.
 
 let sum l = List.fold_left (+.) 0. l
 
@@ -119,8 +131,8 @@ let normalise l = let s = (sum l) in List.map (fun x -> x /. s) l
 
 let log_factorial x =
   let rec loop i a =
-    if x < i then a
-    else loop (i +. 1.) (a +. (log i))
+    if i > x then a
+    else loop (i +. 1.) (a +. log i)
   in loop 1. 0.
   
 let choose n k =
@@ -138,11 +150,6 @@ let log_nemes_closed_form x =
   (x *. log_x) -. x +. (0.5 *. (log_2_pi -. log_x)) +. (1.25 *. x *. (log (fifteen_x_sq +. 1.) -. log (fifteen_x_sq)))
   
 let gamma x = (exp (log_nemes_closed_form (x +. 1.))) /. x
-
-let proposal_dist ~mu ~s x = 
-  if x = 0. then -.infinity
-  else if x = 1. then infinity
-  else mu +. (s *. log (x /. (1. -. x)))
   
 let constrain_categorical (constraints) (classes, probs) =
   let rec loop old_c old_p new_c new_p =
@@ -171,8 +178,8 @@ let get_uniform_constraints l cdf =
         match last_b with
           | None -> a
           | Some b' -> b' in
-        if compare b a < 0 then failwith "Each constraint (a, b) must be such that b >= a"
-        else if compare a new_b < 0 then failwith "Constraints must not overlap"
+        if b < a then failwith "Each constraint (a, b) must be such that b >= a"
+        else if a < new_b then failwith "Constraints must not overlap"
         else
 		  let (c_a, c_b) = (cdf a, cdf b) in
 		  let w = c_b -. c_a in
@@ -182,11 +189,7 @@ let get_uniform_constraints l cdf =
   else u_rs, (normalise w_rs)
 
 let process_constraints l =
-  let rec to_float_list l_Q l_float =
-    match l_Q with
-      | [] -> l_float
-      | (a, b) :: t -> to_float_list t ((Q.to_float a, Q.to_float b) :: l_float)
-  in let sorted = List.sort constraint_comparison (to_float_list l []) in
+  let sorted = List.sort constraint_comparison l in
   let rec loop l' low high domain_size last_b =
     match l' with
       | [] -> sorted, (low, high), (domain_size /. (high -. low))
@@ -230,8 +233,8 @@ let closest m cs =
 let rec make_inclusive c c_inclusive =
   match c with
     | [] -> c_inclusive
-    | (a, b) :: t -> make_inclusive t ((Z.pred a, b) :: c_inclusive)
-  
+    | (a, b) :: t -> make_inclusive t ((a - 1, b) :: c_inclusive)
+
 
 (* Quantile functions *)
 
@@ -242,9 +245,10 @@ let q_binomial ~n ~p x =
   let rec get_successes k prob =
     let term = (choose n k) *. (p ** k) *. ((1. -. p) ** (n -. k)) in
     let new_term = term +. prob in
-    if x <= new_term || k = n then Z.of_float k
+    if x <= new_term || k = n then int_of_float k
     else get_successes (k +. 1.) new_term
-  in if x = 1. then Z.of_float n else get_successes 0. 0.
+  in if x = 1. then int_of_float n else
+  get_successes 0. 0.
 
 let q_categorical ~classes ~probs x =
   let rec loop prob cs ps =
@@ -258,36 +262,48 @@ let q_categorical ~classes ~probs x =
   in loop 0. classes probs
 
 let q_cauchy ~x_0 ~gamma x =
-  if x = 0. then Q.minus_inf
-  else if x = 1. then Q.inf
-  else Q.of_float (x_0 +. (gamma *. tan(pi *. (x -. 0.5))))
+  if x = 0. then -.infinity
+  else if x = 1. then infinity
+  else x_0 +. (gamma *. tan(pi *. (x -. 0.5)))
 
 let q_exponential ~lambda x = 
-  if x = 1. then Q.minus_inf
-  else Q.of_float (-.(log (1. -. x)) /. lambda)
+  if x = 1. then -.infinity
+  else -.(log (1. -. x)) /. lambda
 
 let q_laplace ~mu ~b x = 
-  if x = 0. then Q.minus_inf
-  else if x = 1. then Q.inf
-  else if x <= 0.5 then Q.of_float (mu +. (b *. log (2. *. x)))
-  else Q.of_float (mu -. (b *. log (2. -. (2. *. x))))
+  if x = 0. then -.infinity
+  else if x = 1. then infinity
+  else if x <= 0.5 then mu +. (b *. log (2. *. x))
+  else mu -. (b *. log (2. -. (2. *. x)))
 
 let q_logistic ~mu ~s x = 
-  if x = 0. then Q.minus_inf
-  else if x = 1. then Q.inf
-  else Q.of_float (mu +. (s *. log (x /. (1. -. x))))
+  if x = 0. then -.infinity
+  else if x = 1. then infinity
+  else mu +. (s *. log (x /. (1. -. x)))
 
 let q_poisson ~lambda x =
   let rec get_successes k prob =
     let log_term = -.lambda +. (k *. log lambda) -. log_factorial k in
     let term = exp log_term in
-    if x <= term +. prob then Z.of_float k
+    if x <= term +. prob then int_of_float k
     else get_successes (k +. 1.) (term +. prob)
-  in if x = 1. then Z.of_int max_int
+  in if x = 1. then max_int
   else get_successes 0. 0.
 
 let q_uniform ~a ~b x = 
-  Q.of_float (a +. ((b -. a) *. x))
+  a +. ((b -. a) *. x)
+
+let q_beta ~a ~b x = 
+  GSL.beta_Pinv ~p:x ~a ~b
+
+let q_gamma ~k ~theta x =
+  GSL.gamma_Pinv ~p:x ~a:k ~b:theta
+
+let q_gaussian ~mu ~sigma x =
+  mu +. GSL.gaussian_Pinv ~p:x ~sigma
+
+let q_lognormal ~mu ~sigma x =
+  GSL.lognormal_Pinv ~p:x ~zeta:mu ~sigma
 
 
 (* Cumulative density functions *)
@@ -296,7 +312,6 @@ let c_bernoulli ~p x =
   if x then 1. else (1. -. p)
 
 let c_binomial ~n ~p x =
-  let x = Z.to_float x in
   let rec get_prob k prob =
     if k > x then prob
     else
@@ -316,25 +331,20 @@ let c_categorical ~classes ~probs x =
   in loop 0. classes probs
 
 let c_cauchy ~x_0 ~gamma x = 
-  let x = Q.to_float x in
   (1. /. pi) *. atan ((x -. x_0) /. gamma) +. 0.5
 
 let c_exponential ~lambda x = 
-  let x = Q.to_float x in
   if x < 0. then 0.
   else 1. -. exp (-.lambda *. x) 
 
 let c_laplace ~mu ~b x = 
-  let x = Q.to_float x in
   if x <= mu then 0.5 *. exp ((x -. mu) /. b)
   else 1. -. (0.5 *. exp (-. (x -. mu) /. b))
 
 let c_logistic ~mu ~s x = 
-  let x = Q.to_float x in
   1. /. (1. +. exp (-. (x -. mu) /. s))
 
 let c_poisson ~lambda x =
-  let x = Z.to_float x in
   let rec get_prob k prob =
     if k > x then prob
     else
@@ -344,16 +354,26 @@ let c_poisson ~lambda x =
   in get_prob 0. 0.
 
 let c_uniform ~a ~b x =
-  let x = Q.to_float x in
   if x < a then 0.
   else if x > b then 1.
-  else (x -. a) /. (b -. a) 
+  else (x -. a) /. (b -. a)
+
+let c_beta ~a ~b x = 
+  GSL.beta_P ~x ~a ~b
+
+let c_gamma ~k ~theta x =
+  GSL.gamma_P ~x ~a:k ~b:theta
+
+let c_gaussian ~mu ~sigma x =
+  GSL.gaussian_P ~x:(x -. mu) ~sigma
+
+let c_lognormal ~mu ~sigma x =
+  GSL.lognormal_P ~x ~zeta:mu ~sigma
 
 
 (* Density functions *)
 
 let d_beta ~a ~b x =
-  (* let x = Q.to_float x in *)
   if x < 0. then failwith "Beta PDF is not defined for x < 0"
   else if x > 1. then failwith "Beta PDF is not defined for x > 1"
   else if a < 1. && x = 0. then infinity
@@ -363,7 +383,6 @@ let d_beta ~a ~b x =
     (1. /. z) *. (x ** (a -. 1.)) *. ((1. -. x) ** (b -. 1.))
 
 let d_gamma ~k ~theta x =
-  (* let x = Q.to_float x in *)
   if x < 0. then failwith "Gamma PDF is not defined for x < 0"
   else if k < 1. && x = 0. then infinity
   else 
@@ -371,13 +390,11 @@ let d_gamma ~k ~theta x =
     (1. /. z) *. (x ** (k -. 1.)) *. (exp (-.x /. theta))
 
 let d_gaussian ~mu ~sigma x =
-  (* let x = Q.to_float x in *)
   let z = sigma *. sqrt (2. *. pi) in
   let e = ((x -. mu) ** 2.) /. (2. *. (sigma ** 2.)) in
   (1. /. z) *. exp (-.e)
 
 let d_lognormal ~mu ~sigma x =
-  (* let x = Q.to_float x in *)
   if x < 0. then failwith "LogNormal PDF is not defined for x < 0"
   else if x = 0. then 0.
   else
@@ -406,7 +423,7 @@ let mcmc_sample pdf constraints bounds gradient cur_x step =
           apply_constraints p t new_region
       | [] -> None
   in let rec get_proposal () =
-    let new_x = proposal_dist ~mu:cur_x ~s:step (base ()) in
+    let new_x = q_logistic ~mu:cur_x ~s:step (base ()) in
     (* let epsilon = base ~a:(-.step) ~b:step () in *)
     (* let new_x = cur_x +. epsilon in *)
     if new_x < lower || new_x > upper then
@@ -418,6 +435,7 @@ let mcmc_sample pdf constraints bounds gradient cur_x step =
       match result with
         | None -> get_proposal ()
         | Some f -> f 
+
   in let new_x = get_proposal () in
   let ratio = (pdf new_x) /. (pdf cur_x) in
   if base () <= ratio then new_x else cur_x
@@ -459,8 +477,8 @@ module Sampler = struct
             loop (s :: samples) (num - 1)
       in loop [] n
   end
-  module Make_MCMC (D : MCMC_S) : S with type value = Q.t = struct
-    type value = Q.t
+  module Make_MCMC (D : MCMC_S) : S with type value = float = struct
+    type value = float
     let batch = D.to_burn / 20
     let lower, upper = D.bounds
     let max_step = (upper -. lower)
@@ -485,9 +503,9 @@ module Sampler = struct
         match num with
           | 0 -> samples
           | _ -> 
-            let s = mcmc_sample D.pdf D.constraints D.bounds D.gradient last step in
-            if s = last then loop (Q.of_float s :: samples) (num - 1) s a (r + 1)
-            else loop (Q.of_float s :: samples) (num - 1) s (a + 1) r
+            let s = mcmc_sample D.pdf D.constraints D.bounds D.gradient last step in 
+            if s = last then loop (s :: samples) (num - 1) s a (r + 1)
+            else loop (s :: samples) (num - 1) s (a + 1) r
       in loop [] n start 0 0
     end
 end
@@ -496,16 +514,14 @@ end
 (* Distribution modules *)
 
 module Bernoulli 
-  (Params : sig val p : Q.t end) 
+  (Params : sig val p : float end) 
   (Constraints : sig val c : bool option end)
   : Sampler.S with type value = bool = struct
-    let p = Q.to_float Params.p in
-    assert (bounded p)
+    assert (bounded Params.p)
     include Sampler.Make_Inverse_Transform (struct
       type value = bool
-      let p = Q.to_float Params.p
-      let qf = q_bernoulli ~p
-      let cdf = c_bernoulli ~p
+      let qf x = q_bernoulli x ~p:Params.p
+      let cdf x = c_bernoulli x ~p:Params.p
       let constraints = 
         match Constraints.c with
           | None -> [], []
@@ -513,44 +529,57 @@ module Bernoulli
     end)
 end
 
-module Beta 
-  (Params : sig val a : Q.t val b : Q.t end) 
-  (Constraints : sig val c : (Q.t * Q.t) list option end)
-  : Sampler.S with type value = Q.t = struct
-    let a, b = Q.to_float Params.a, Q.to_float Params.b in
-    assert (a > 0. &&
-            b > 0.)
+(* module Beta 
+  (Params : sig val a : float val b : float end) 
+  (Constraints : sig val c : (float * float) list option end)
+  : Sampler.S with type value = float = struct
+    assert (Params.a > 0. &&
+            Params.b > 0.)
     include Sampler.Make_MCMC (struct
-      type value = Q.t
-      let a, b = Q.to_float Params.a, Q.to_float Params.b
-      let pdf = d_beta ~a ~b
+      type value = float
+      let pdf x = d_beta x ~a:Params.a ~b:Params.b
       let constraints, bounds, gradient = 
         match Constraints.c with
           | None -> [], (0., 1.), 0.
           | Some l -> process_constraints l
       let step =
-        let lower, upper = bounds in 
-        0.2 *. (upper -. lower)
+        let lower, upper = bounds in 0.2 *. (upper -. lower)
       let start = 
-        let mean = a /. (a +. b) in
+        let mean = Params.a /. (Params.a +. Params.b) in
         if constraints = [] then mean
         else closest mean constraints
       let to_burn = if true then 20000 else 0
     end)
+end *)
+
+module Beta 
+  (Params : sig val a : float val b : float end) 
+  (Constraints : sig val c : (float * float) list option end)
+  : Sampler.S with type value = float = struct
+    assert (Params.a > 0. &&
+            Params.b > 0.)
+    include Sampler.Make_Inverse_Transform (struct
+      type value = float
+      let qf x = q_beta x ~a:Params.a ~b:Params.b
+      let cdf x = c_beta x ~a:Params.a ~b:Params.b
+      let constraints = 
+        match Constraints.c with
+          | None -> [], []
+          | Some l -> get_uniform_constraints l cdf
+    end)
 end
 
 module Binomial 
-  (Params : sig val n : Z.t val p : Q.t end) 
-  (Constraints : sig val c : (Z.t * Z.t) list option end)
-  : Sampler.S with type value = Z.t = struct
-    let p, n = Q.to_float Params.p, Z.to_int Params.n in
-    assert (bounded p &&
-            n >= 0)
+  (Params : sig val n : int val p : float end) 
+  (Constraints : sig val c : (int * int) list option end)
+  : Sampler.S with type value = int = struct
+    assert (bounded Params.p &&
+            Params.n >= 0)
     include Sampler.Make_Inverse_Transform (struct
-      type value = Z.t
-      let p, n = Q.to_float Params.p, Z.to_float Params.n
-      let qf = q_binomial ~n ~p
-      let cdf = c_binomial ~n ~p
+      type value = int
+      let float_n = float Params.n
+      let qf x = q_binomial x ~n:float_n ~p:Params.p
+      let cdf x = c_binomial (float x) ~n:float_n ~p:Params.p
       let constraints = 
         match Constraints.c with
           | None -> [], []
@@ -559,39 +588,35 @@ module Binomial
 end
 
 module Categorical 
-  (Params : sig type t val classes : t list val probs : Q.t list end) 
+  (Params : sig type t val classes : t list val probs : float list end) 
   (Constraints : sig type t = Params.t val c : t list option end)
   : Sampler.S with type value = Params.t = struct
-    let classes, probs = Params.classes, List.map Q.to_float Params.probs in
-    assert (classes <> [] &&
+    assert (Params.classes <> [] &&
             Constraints.c <> Some [] &&
-            List.length classes = List.length probs &&
-            List.for_all bounded probs &&
-            sum probs = 1.)
+            List.length Params.classes = List.length Params.probs &&
+            List.for_all bounded Params.probs &&
+            sum Params.probs = 1.)
     include Sampler.Make_Inverse_Transform (struct
       type value = Params.t
-      let cs, ps = Params.classes, List.map Q.to_float Params.probs
       let constraints = [], []
-      let classes, probs =
+      let cs, ps =
         match Constraints.c with
-          | None -> cs, ps
-          | Some l -> constrain_categorical l (cs, ps) 
-      let qf = q_categorical ~classes ~probs
-      let cdf = c_categorical ~classes ~probs
+          | None -> Params.classes, Params.probs
+          | Some l -> constrain_categorical l (Params.classes, Params.probs) 
+      let qf x = q_categorical x ~classes:cs ~probs:ps
+      let cdf x = c_categorical x ~classes:cs ~probs:ps
     end)
 end
 
 module Cauchy 
-  (Params : sig val x_0 : Q.t val gamma : Q.t end) 
-  (Constraints : sig val c : (Q.t * Q.t) list option end)
-  : Sampler.S with type value = Q.t = struct
-    let gamma = Q.to_float Params.gamma in
-    assert (gamma > 0.)
+  (Params : sig val x_0 : float val gamma : float end) 
+  (Constraints : sig val c : (float * float) list option end)
+  : Sampler.S with type value = float = struct
+    assert (Params.gamma > 0.)
     include Sampler.Make_Inverse_Transform (struct
-      type value = Q.t
-      let x_0, gamma = Q.to_float Params.x_0, Q.to_float Params.gamma
-      let qf = q_cauchy ~x_0 ~gamma
-      let cdf = c_cauchy ~x_0 ~gamma
+      type value = float
+      let qf x = q_cauchy x ~x_0:Params.x_0 ~gamma:Params.gamma
+      let cdf x = c_cauchy x ~x_0:Params.x_0 ~gamma:Params.gamma
       let constraints = 
         match Constraints.c with
           | None -> [], []
@@ -600,16 +625,14 @@ module Cauchy
 end
 
 module Exponential 
-  (Params : sig val lambda : Q.t end) 
-  (Constraints : sig val c : (Q.t * Q.t) list option end)
-  : Sampler.S with type value = Q.t = struct
-    let lambda = Q.to_float Params.lambda in
-    assert (lambda > 0.)
+  (Params : sig val lambda : float end) 
+  (Constraints : sig val c : (float * float) list option end)
+  : Sampler.S with type value = float = struct
+    assert (Params.lambda > 0.)
     include Sampler.Make_Inverse_Transform (struct
-      type value = Q.t
-      let lambda = Q.to_float Params.lambda
-      let qf = q_exponential ~lambda
-      let cdf = c_exponential ~lambda
+      type value = float
+      let qf x = q_exponential x ~lambda:Params.lambda
+      let cdf x = c_exponential x ~lambda:Params.lambda
       let constraints = 
         match Constraints.c with
           | None -> [], []
@@ -617,73 +640,100 @@ module Exponential
     end)
 end
 
-module Gamma 
-  (Params : sig val k : Q.t val theta : Q.t end) 
-  (Constraints : sig val c : (Q.t * Q.t) list option end)
-  : Sampler.S with type value = Q.t = struct
-    let k, theta = Q.to_float Params.k, Q.to_float Params.theta in
-    assert (k > 0. 
-            && theta > 0.)
+(* module Gamma 
+  (Params : sig val k : float val theta : float end) 
+  (Constraints : sig val c : (float * float) list option end)
+  : Sampler.S with type value = float = struct
+    assert (Params.k > 0. 
+            && Params.theta > 0.)
     include Sampler.Make_MCMC (struct
-      type value = Q.t
-      let k, theta = Q.to_float Params.k, Q.to_float Params.theta
-      let pdf = d_gamma ~k ~theta
+      type value = float
+      let pdf x = d_gamma x ~k:Params.k ~theta:Params.theta
       let constraints, bounds, gradient = 
         match Constraints.c with
           | None -> [], (0., max_float), 0.
           | Some l -> process_constraints l
       let step =
-        let std = theta *. sqrt k in
+        let std = Params.theta *. sqrt Params.k in
         let lower, upper = bounds in
         if constraints = [] then 2.5 *. std
         else min (0.2 *. (upper -. lower)) (2.5 *. std)
       let start = 
-        let mean = k *. theta in
+        let mean = Params.k *. Params.theta in
         if constraints = [] then mean
         else closest mean constraints
       let to_burn = if true then 20000 else 0
     end)
+end *)
+
+module Gamma 
+  (Params : sig val k : float val theta : float end) 
+  (Constraints : sig val c : (float * float) list option end)
+  : Sampler.S with type value = float = struct
+    assert (Params.k > 0. 
+            && Params.theta > 0.)
+    include Sampler.Make_Inverse_Transform (struct
+      type value = float
+      let qf x = q_gamma x ~k:Params.k ~theta:Params.theta
+      let cdf x = c_gamma x ~k:Params.k ~theta:Params.theta
+      let constraints = 
+        match Constraints.c with
+          | None -> [], []
+          | Some l -> get_uniform_constraints l cdf
+    end)
 end
 
-module Gaussian
-  (Params : sig val mu : Q.t val sigma : Q.t end) 
-  (Constraints : sig val c : (Q.t * Q.t) list option end)
-  : Sampler.S with type value = Q.t = struct
-    let sigma = Q.to_float Params.sigma in
-    assert (sigma > 0.)
+(* module Gaussian
+  (Params : sig val mu : float val sigma : float end) 
+  (Constraints : sig val c : (float * float) list option end)
+  : Sampler.S with type value = float = struct
+    assert (Params.sigma > 0.)
     include Sampler.Make_MCMC (struct
-      type value = Q.t
-      let mu, sigma = Q.to_float Params.mu, Q.to_float Params.sigma
-      let pdf = d_gaussian ~mu ~sigma
+      type value = float
+      let pdf x = d_gaussian x ~mu:Params.mu ~sigma:Params.sigma
       let constraints, bounds, gradient = 
         match Constraints.c with
           | None -> [], (min_float, max_float), 0.
           | Some l -> process_constraints l
       let step =
-        let std = sigma in
+        let std = Params.sigma in
         let lower, upper = bounds in
         if constraints = [] then 2.5 *. std
         else min (0.25 *. (upper -. lower)) (2.5 *. std)
       let start = 
-        let mean = mu in
+        let mean = Params.mu in
         if constraints = [] then mean
         else closest mean constraints
       let to_burn = 
         if true then 20000 else 0
     end)
+end *)
+
+module Gaussian
+  (Params : sig val mu : float val sigma : float end) 
+  (Constraints : sig val c : (float * float) list option end)
+  : Sampler.S with type value = float = struct
+    assert (Params.sigma > 0.)
+    include Sampler.Make_Inverse_Transform (struct
+      type value = float
+      let qf x = q_gaussian x ~mu:Params.mu ~sigma:Params.sigma
+      let cdf x = c_gaussian x ~mu:Params.mu ~sigma:Params.sigma
+      let constraints = 
+        match Constraints.c with
+          | None -> [], []
+          | Some l -> get_uniform_constraints l cdf
+    end)
 end
 
 module Laplace 
-  (Params : sig val mu : Q.t val b : Q.t end) 
-  (Constraints : sig val c : (Q.t * Q.t) list option end)
-  : Sampler.S with type value = Q.t = struct
-    let b = Q.to_float Params.b in
-    assert (b > 0.)
+  (Params : sig val mu : float val b : float end) 
+  (Constraints : sig val c : (float * float) list option end)
+  : Sampler.S with type value = float = struct
+    assert (Params.b > 0.)
     include Sampler.Make_Inverse_Transform (struct
-      type value = Q.t
-      let mu, b = Q.to_float Params.mu, Q.to_float Params.b
-      let qf = q_laplace ~mu ~b
-      let cdf = c_laplace ~mu ~b
+      type value = float
+      let qf x = q_laplace x ~mu:Params.mu ~b:Params.b
+      let cdf x = c_laplace x ~mu:Params.mu ~b:Params.b
       let constraints = 
         match Constraints.c with
           | None -> [], []
@@ -692,16 +742,14 @@ module Laplace
 end
 
 module Logistic 
-  (Params : sig val mu : Q.t val s : Q.t end) 
-  (Constraints : sig val c : (Q.t * Q.t) list option end)
-  : Sampler.S with type value = Q.t = struct
-    let s = Q.to_float Params.s in
-    assert (s > 0.)
+  (Params : sig val mu : float val s : float end) 
+  (Constraints : sig val c : (float * float) list option end)
+  : Sampler.S with type value = float = struct
+    assert (Params.s > 0.)
     include Sampler.Make_Inverse_Transform (struct
-      type value = Q.t
-      let mu, s = Q.to_float Params.mu, Q.to_float Params.s
-      let qf = q_logistic ~mu ~s
-      let cdf = c_logistic ~mu ~s
+      type value = float
+      let qf x = q_logistic x ~mu:Params.mu ~s:Params.s
+      let cdf x = c_logistic x ~mu:Params.mu ~s:Params.s
       let constraints = 
         match Constraints.c with
           | None -> [], []
@@ -709,44 +757,56 @@ module Logistic
     end)
 end
 
-module LogNormal
-  (Params : sig val mu : Q.t val sigma : Q.t end) 
-  (Constraints : sig val c : (Q.t * Q.t) list option end)
-  : Sampler.S with type value = Q.t = struct
-    let sigma = Q.to_float Params.sigma in
-    assert (sigma > 0.)
+(* module LogNormal
+  (Params : sig val mu : float val sigma : float end) 
+  (Constraints : sig val c : (float * float) list option end)
+  : Sampler.S with type value = float = struct
+    assert (Params.sigma > 0.)
     include Sampler.Make_MCMC (struct
-      type value = Q.t
-      let mu, sigma = Q.to_float Params.mu, Q.to_float Params.sigma
-      let pdf = d_lognormal ~mu ~sigma
+      type value = float
+      let pdf x = d_lognormal x ~mu:Params.mu ~sigma:Params.sigma
       let constraints, bounds, gradient = 
         match Constraints.c with
           | None -> [], (0., max_float), 0.
           | Some l -> process_constraints l
       let step =
-        let std = ((exp (sigma ** 2.)) -. 1.) *. exp ((2. *. mu) +. (sigma ** 2.)) in
+        let std = ((exp (Params.sigma ** 2.)) -. 1.) *. exp ((2. *. Params.mu) +. (Params.sigma ** 2.)) in
         let lower, upper = bounds in
         if constraints = [] then 2.5 *. std
         else min (0.25 *. (upper -. lower)) (2.5 *. std)
       let start = 
-        let mean = exp (mu +. ((sigma ** 2.) /. 2.)) in
+        let mean = exp (Params.mu +. ((Params.sigma ** 2.) /. 2.)) in
         if constraints = [] then mean
         else closest mean constraints
       let to_burn = if true then 20000 else 0
     end)
+end *)
+
+module LogNormal
+  (Params : sig val mu : float val sigma : float end) 
+  (Constraints : sig val c : (float * float) list option end)
+  : Sampler.S with type value = float = struct
+    assert (Params.sigma > 0.)
+    include Sampler.Make_Inverse_Transform (struct
+      type value = float
+      let qf x = q_lognormal x ~mu:Params.mu ~sigma:Params.sigma
+      let cdf x = q_lognormal x ~mu:Params.mu ~sigma:Params.sigma
+      let constraints = 
+        match Constraints.c with
+          | None -> [], []
+          | Some l -> get_uniform_constraints l cdf
+    end)
 end
 
 module Poisson 
-  (Params : sig val lambda : Q.t end) 
-  (Constraints : sig val c : (Z.t * Z.t) list option end)
-  : Sampler.S with type value = Z.t = struct
-    let lambda = Q.to_float Params.lambda in
-    assert (lambda >= 0.)
+  (Params : sig val lambda : float end) 
+  (Constraints : sig val c : (int * int) list option end)
+  : Sampler.S with type value = int = struct
+    assert (Params.lambda >= 0.)
     include Sampler.Make_Inverse_Transform (struct
-      type value = Z.t
-      let lambda = Q.to_float Params.lambda
-      let qf = q_poisson ~lambda
-      let cdf = c_poisson ~lambda
+      type value = int
+      let qf x = q_poisson x ~lambda:Params.lambda
+      let cdf x = c_poisson (float x) ~lambda:Params.lambda
       let constraints = 
         match Constraints.c with
           | None -> [], []
@@ -755,16 +815,14 @@ module Poisson
 end
 
 module Uniform 
-  (Params : sig val a : Q.t val b : Q.t end) 
-  (Constraints : sig val c : (Q.t * Q.t) list option end)
-  : Sampler.S with type value = Q.t = struct
-    let a, b = Q.to_float Params.a, Q.to_float Params.b in
-    assert (a <= b)
+  (Params : sig val a : float val b : float end) 
+  (Constraints : sig val c : (float * float) list option end)
+  : Sampler.S with type value = float = struct
+    assert (Params.a <= Params.b)
     include Sampler.Make_Inverse_Transform (struct
-      let a, b = Q.to_float Params.a, Q.to_float Params.b
-      type value = Q.t
-      let qf = q_uniform ~a ~b
-      let cdf = c_uniform ~a ~b
+      type value = float
+      let qf x = q_uniform x ~a:Params.a ~b:Params.b
+      let cdf x = c_uniform x ~a:Params.a ~b:Params.b
       let constraints = 
         match Constraints.c with
           | None -> [], []
