@@ -9,7 +9,9 @@ module RS = Random.State
 
 module NC = Nocrypto.Rng
 
-module GSL = Gsl.Cdf
+module GSL = Gsl.Rng
+
+module D = Gsl.Cdf
 
 
 (* Constants *)
@@ -27,11 +29,9 @@ let q0 = Q.zero
 
 (* OCaml standard PRNG *)
 
-type st = RS.t
+let rs_seed = [| 19841983; 7298712389; 17862387612 |]
 
-let default_seed = [| 19841983; 7298712389; 17862387612 |]
-
-let prng = RS.make default_seed
+let rs_prng = RS.make rs_seed
 
 let rs_bool st () = RS.bool st
 
@@ -60,55 +60,90 @@ let rs_base st ?(a = 0.) ?(b = 1.) () =
 
 (* Nocrypto PRNG *)
 
-let () = Nocrypto_entropy_unix.initialize ()
+let nc_seed = Cstruct.of_string "19841983, 7298712389, 17862387612"
 
-let nc_bool () = 
-  let b = NC.Int.gen_bits 1 in 
+let nc_prng = NC.(create ~seed:nc_seed (module Generators.Fortuna))
+
+let nc_bool st () = 
+  let b = NC.Int.gen_bits ~g:st 1 in 
   if b = 0 then false else true
 
-let nc_int ?(bound = max_int_bits) () = 
-  let i = (NC.Int.gen bound) in
-  if nc_bool () then i
+let nc_int st ?(bound = max_int_bits) () = 
+  let i = (NC.Int.gen ~g:st bound) in
+  if nc_bool st () then i
   else -i
 
-let nc_Z ?(bound = Z.of_int max_int_bits) () =
-  let z = NC.Z.gen bound in
-  if nc_bool () then z
+let nc_Z st ?(bound = Z.of_int max_int_bits) () =
+  let z = NC.Z.gen ~g:st bound in
+  if nc_bool st () then z
   else Z.neg z
   
-let nc_base ?(a = 0.) ?(b = 1.) () = 
+let nc_base st ?(a = 0.) ?(b = 1.) () = 
   if a > b then 
 	failwith "Cannot sample from base of negative range"
   else 
-	let x = float_of_int (NC.Int.gen (pred bits_26)) in
-    let y = float_of_int (NC.Int.gen (pred bits_26)) in
+	let x = float_of_int (NC.Int.gen ~g:st (pred bits_26)) in
+    let y = float_of_int (NC.Int.gen ~g:st (pred bits_26)) in
     let scale = float_of_int bits_26 in
     let base = (x /. scale +. y) /. scale in
     (b -. a) *. base +. a
 
-let nc_float ?(bound = float_of_int max_int_bits) () = 
-  let f = nc_base ~a:0. ~b:bound () in
-  if nc_bool () then f
+let nc_float st ?(bound = float_of_int max_int_bits) () = 
+  let f = nc_base st ~a:0. ~b:bound () in
+  if nc_bool st () then f
   else -.f
  
-let nc_Q ?(bound = Q.of_int max_int_bits) () =
-  let n = nc_Z () in
-  let d = nc_Z () in
+let nc_Q st ?(bound = Q.of_int max_int_bits) () =
+  let n = nc_Z st () in
+  let d = nc_Z st () in
   Q.mul {num = n; den = d} bound
 
 
 (* GSL PRNG *)
 
+let gsl_seed = Nativeint.of_int 19841983
 
+let gsl_prng = GSL.make GSL.MT19937
+
+let () = GSL.set gsl_prng gsl_seed
+
+let gsl_bool st () =
+  let b = GSL.uniform_int st 2 in
+  if b = 0 then false else true
+
+let gsl_int st ?(bound = max_int_bits) () = 
+  let i = (GSL.uniform_int st bound) in
+  if gsl_bool st () then i
+  else -i
+
+let gsl_Z st ?(bound = max_int_bits) () = 
+  let i = gsl_int st ~bound () in Z.of_int i
+  
+let gsl_base st ?(a = 0.) ?(b = 1.) () = 
+  if a > b then 
+	failwith "Cannot sample from base of negative range"
+  else 
+	let base = GSL.uniform st in
+    (b -. a) *. base +. a
+
+let gsl_float st ?(bound = float_of_int max_int_bits) () = 
+  let f = gsl_base st ~a:0. ~b:bound () in
+  if gsl_bool st () then f
+  else -.f
+ 
+let gsl_Q st ?(bound = Q.of_int max_int_bits) () =
+  let n = gsl_Z st () in
+  let d = gsl_Z st () in
+  Q.mul {num = n; den = d} bound
 
 
 (* Primitive random element *)
 
-(* let base ?(a = 0.) ?(b = 1.) () = rs_base prng ~a ~b () *)
+let base ?(a = 0.) ?(b = 1.) () = rs_base rs_prng ~a ~b ()
 
-let base ?(a = 0.) ?(b = 1.) () = nc_base ~a ~b ()
+let base ?(a = 0.) ?(b = 1.) () = nc_base nc_prng ~a ~b ()
 
-(* let base ?(a = 0.) ?(b = 1.) () = gsl_base ~a ~b () *)
+let base ?(a = 0.) ?(b = 1.) () = gsl_base gsl_prng ~a ~b ()
 
 
 (* Helper functions *)
@@ -294,16 +329,16 @@ let q_uniform ~a ~b x =
   a +. ((b -. a) *. x)
 
 let q_beta ~a ~b x = 
-  GSL.beta_Pinv ~p:x ~a ~b
+  D.beta_Pinv ~p:x ~a ~b
 
 let q_gamma ~k ~theta x =
-  GSL.gamma_Pinv ~p:x ~a:k ~b:theta
+  D.gamma_Pinv ~p:x ~a:k ~b:theta
 
 let q_gaussian ~mu ~sigma x =
-  mu +. GSL.gaussian_Pinv ~p:x ~sigma
+  mu +. D.gaussian_Pinv ~p:x ~sigma
 
 let q_lognormal ~mu ~sigma x =
-  GSL.lognormal_Pinv ~p:x ~zeta:mu ~sigma
+  D.lognormal_Pinv ~p:x ~zeta:mu ~sigma
 
 
 (* Cumulative density functions *)
@@ -359,16 +394,16 @@ let c_uniform ~a ~b x =
   else (x -. a) /. (b -. a)
 
 let c_beta ~a ~b x = 
-  GSL.beta_P ~x ~a ~b
+  D.beta_P ~x ~a ~b
 
 let c_gamma ~k ~theta x =
-  GSL.gamma_P ~x ~a:k ~b:theta
+  D.gamma_P ~x ~a:k ~b:theta
 
 let c_gaussian ~mu ~sigma x =
-  GSL.gaussian_P ~x:(x -. mu) ~sigma
+  D.gaussian_P ~x:(x -. mu) ~sigma
 
 let c_lognormal ~mu ~sigma x =
-  GSL.lognormal_P ~x ~zeta:mu ~sigma
+  D.lognormal_P ~x ~zeta:mu ~sigma
 
 
 (* Density functions *)
