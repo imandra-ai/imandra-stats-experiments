@@ -1,4 +1,4 @@
-(* dists.ml - Submodules and functors defining common distributions
+(* dists.ml - Sub-modules and functors defining common distributions
 Lewis Hammond - lewis@imandra.ai
 2019 *)
 
