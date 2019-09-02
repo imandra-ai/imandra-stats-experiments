@@ -1,0 +1,5 @@
+(library
+ (public_name probs)
+ (name probs)
+ (modules ("dists" models utils))
+ (libraries zarith nocrypto gsl))

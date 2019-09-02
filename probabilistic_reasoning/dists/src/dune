@@ -1,4 +1,0 @@
-(library
- (public_name dists)
- (name dists)
- (libraries zarith))
