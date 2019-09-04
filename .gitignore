@@ -17,6 +17,7 @@ dune-project
 *.cmi
 *.cmx
 *.o
+*.opam
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -24,3 +25,11 @@ dune-project
 # Environments
 env/
 venv/
+
+# Sub-directories
+probabilistic_reasoning/examples/
+probabilistic_reasoning/imandra_src/
+probabilistic_reasoning/probs/dist_tests/ocaml_output/
+probabilistic_reasoning/probs/dist_tests/python_output/
+probabilistic_reasoning/probs/dist_tests/samples/
+probabilistic_reasoning/probs/dist_tests/constraints/
