@@ -1,0 +1,80 @@
+(* Demonstration of how to create probabilistic models defining distributions
+over the input to a decomposed function in order to output a discrete
+probability distribution over the function's regions *)
+
+
+(* Open the module *)
+
+#require "imandra-tools";;
+
+open Imandra_tools.Region_probs;;
+
+
+(* Declare types, functions, or side-conditions, including the domain type *)
+
+type colour = Red | Green | Blue;;
+  
+type obj = {colour : colour;
+            mass   : Q.t;
+            faces  : Z.t};;
+
+type dom = (obj * bool * Q.t);;
+
+let f ((obj, sunny, temp) : dom) =
+  let a = 
+    if obj.colour = Red then
+      obj.mass *. temp
+    else
+      100. -. temp
+  in let b =
+    if sunny then 
+      obj.faces
+    else 
+      23
+  in (a, b);;
+
+let g ((obj, sunny, temp) : dom) =
+  obj.colour = Green && temp >. 17.
+
+
+(* Decompose the function to get regions *)
+
+let regions = Decompose.top "f" [@@program];;
+
+let constrained_regions = Decompose.top ~assuming:"g" "f" [@@program];;
+
+
+(* Define a joint distribution over the domain *)
+
+let d () =
+  let c = categorical ~classes:[Red; Green; Blue] ~probs:[0.5; 0.2; 0.3] () in
+  let s = bernoulli ~p:0.4 () in
+  let mu = if s then 20. else 10. in
+  let t = logistic ~mu ~s:5.0 () in
+  let m_constraints = Some [(10.4, 24.7);(33.2, 36.9)] in
+  let m = uniform ~a:10.4 ~b:36.9 ~constraints:m_constraints () in
+  let f_constraints = if c = Green then Some [(7, 10)] else None in
+  let f = poisson ~lambda:6.5 ~constraints:f_constraints () in
+  let o = {colour = c; mass = m; faces = f} in
+  (o, s, t) [@@program];;
+
+
+(* Create a module using the distribution and domain type *)
+
+module Example = Make (struct type domain = dom let dist = d end) [@@program];;
+
+
+(* Calculate and print probabilities *)
+
+let probs = Example.get_probs regions () [@@program];;
+
+print_probs probs;;
+
+let constrained_probs = Example.get_probs constrained_regions () [@@program];;
+
+print_probs constrained_probs;;
+
+
+(* Query the distribution with functions expressing Boolean conditions *)
+
+Example.query g ();;

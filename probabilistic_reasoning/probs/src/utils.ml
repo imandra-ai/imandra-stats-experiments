@@ -1,4 +1,4 @@
-(* utils.ml - Utility functions for sampling from distributions 
+(* utils.ml - Utility functions for sampling from distributions
 Lewis Hammond - lewis@imandra.ai
 2019 *)
 

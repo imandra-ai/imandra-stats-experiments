@@ -31,11 +31,12 @@ end
 module Sampler = struct
   module type S = sig
     type value
-    val sample : ?start:float -> ?step:float -> int -> value list
+    val sample_n : ?start:float -> ?step:float -> int -> value list
+    val sample_1 : unit -> value
   end
   module Make_Inverse_Transform (D : Inverse_Transform_S) : S with type value = D.value = struct
     type value = D.value
-    let sample ?start:_ ?step:_ n =
+    let sample_n ?start:_ ?step:_ n =
       let rec loop samples num =
         match num with
           | 0 -> samples
@@ -43,6 +44,7 @@ module Sampler = struct
             let s = inverse_transform_sample D.qf D.constraints in 
             loop (s :: samples) (num - 1)
       in loop [] n
+    let sample_1 () = inverse_transform_sample D.qf D.constraints
   end
   module Make_MCMC (D : MCMC_S) : S with type value = float = struct
     type value = float
@@ -65,7 +67,7 @@ module Sampler = struct
             else
               burn (b_num - 1) s b_step a' r'
     let burn_in_step = burn D.to_burn D.start D.step 0. 0.
-    let sample ?(start = D.start) ?(step = burn_in_step) n =
+    let sample_n ?(start = D.start) ?(step = burn_in_step) n =
       let rec loop samples num last a r =
         match num with
           | 0 -> samples
@@ -74,6 +76,7 @@ module Sampler = struct
             if s = last then loop (s :: samples) (num - 1) s a (r + 1)
             else loop (s :: samples) (num - 1) s (a + 1) r
       in loop [] n start 0 0
+    let sample_1 () = D.start
     end
 end
 
