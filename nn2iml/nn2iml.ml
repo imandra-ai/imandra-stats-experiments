@@ -9,10 +9,37 @@ let var_list n c =
     else loop (m - 1) (v :: l) in
   loop (n - 1) []
 
-let remove_e s = 
+let remove_e s =
   match String.split_on_char 'e' s with
-    | [f; p] -> (float_of_string f) *. (10. ** float_of_string p)
-    | [f] -> float_of_string f
+    | [f; p] ->
+      begin
+      let ff, minus = 
+        if (float_of_string f) < 0. then
+          String.sub f 1 (String.length f - 1), "-."
+        else
+          f, "" in
+      let z = int_of_string p in
+        if z = 0 then minus ^ ff
+        else match String.split_on_char '.' ff with
+          | [a; b] -> 
+            (let l_z = abs z in
+            if z > 0 then
+              let bb = string_of_int (int_of_string b) in
+              let l_b = String.length bb in
+              if l_b >= l_z then
+                (minus ^ a ^ (String.sub bb 0 l_z) ^ "." ^ (String.sub bb l_z (l_b - l_z)))
+              else
+                (minus ^ a ^ bb ^ (String.make (l_z - l_b) '0') ^ ".")
+            else
+              let aa = string_of_int (int_of_string a) in
+              let l_a = String.length aa in
+              if l_a > l_z then
+                (minus ^ (String.sub aa 0 (l_a - l_z)) ^ "." ^ (String.sub aa (l_a - l_z) l_z) ^ b)
+              else 
+                (minus ^ "0." ^ (String.make (l_z - l_a) '0') ^ aa ^ b))
+          | _ -> failwith "Float has no decimal point!"
+      end
+    | [f] -> f
     | _ -> failwith "String split incorrectly"
 
 let print_line y xs ws b a oc =
@@ -20,10 +47,10 @@ let print_line y xs ws b a oc =
   let rec loop x w =
     if x = [] then ()
     else 
-      let () = output_string oc ("(" ^ (string_of_float (List.hd w)) ^ ")*." ^ (List.hd x) ^ " +. ") in
+      let () = output_string oc ("(" ^ (List.hd w) ^ ")*." ^ (List.hd x) ^ " +. ") in
       loop (List.tl x) (List.tl w) in
     let () = loop xs ws in
-    output_string oc ("(" ^ (string_of_float (List.hd b)) ^ ")) in\n")
+    output_string oc ("(" ^ (List.hd b) ^ ")) in\n")
 
 let print_scaler inputs means ranges oc =
     let xx = var_list inputs "x" in
@@ -34,16 +61,14 @@ let print_scaler inputs means ranges oc =
       else
         let x = List.hd xs in
         let y = List.hd ys in
-        let m = string_of_float (List.hd ms) in
-        let r = string_of_float (List.hd rs) in
+        let m = List.hd ms in
+        let r = List.hd rs in
         let () = output_string oc ("  let " ^ y ^ " = (" ^ x ^ " -. " ^ m ^ ") /. " ^ r ^ " in\n") in
         loop (List.tl xs) (List.tl ys) (List.tl ms) (List.tl rs) in
     let () = loop xx yy means ranges in
     output_string oc ("  (" ^ (String.concat ", " yy) ^ ");;\n\n")
 
 let print_descaler outputs mean range oc =
-  let m = string_of_float mean in
-  let r = string_of_float range in
   let xx = var_list outputs "x" in
   let yy = var_list outputs "y" in
   let () = output_string oc ("let descaler (" ^ (String.concat ", " xx) ^ ") =\n") in
@@ -52,7 +77,7 @@ let print_descaler outputs mean range oc =
     else
       let x = List.hd xs in
       let y = List.hd ys in
-      let () = output_string oc ("  let " ^ y ^ " = (" ^ x ^ " *. " ^ r ^ ") +. " ^ m ^ " in\n") in
+      let () = output_string oc ("  let " ^ y ^ " = (" ^ x ^ " *. " ^ range ^ ") +. " ^ mean ^ " in\n") in
       loop (List.tl xs) (List.tl ys) in
   let () = loop xx yy in
   output_string oc ("  (" ^ (String.concat ", " yy) ^ ");;\n\n")
@@ -66,8 +91,8 @@ let print_bounder inputs mins maxs oc =
     else
       let x = List.hd xs in
       let y = List.hd ys in
-      let m = string_of_float (List.hd ms) in
-      let mm = string_of_float (List.hd mms) in
+      let m = List.hd ms in
+      let mm = List.hd mms in
       let () = output_string oc ("  let " ^ y ^ " = max (" ^ m ^ ") (min " ^ x ^ " (" ^ mm ^ ")) in\n") in
       loop (List.tl xs) (List.tl ys) (List.tl ms) (List.tl mms) in
   let () = loop xx yy mins maxs in
